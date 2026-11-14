@@ -174,6 +174,37 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     // Populate from existing entries
     await db.runAsync(`INSERT INTO entries_fts(slug, title) SELECT slug, title FROM entries`);
   }
+
+  await applyQueryIndexes(db);
+}
+
+// ── Migration step: indexes for the hot read paths ──────────────────────────
+// Kept as its own self-contained, idempotent step (CREATE INDEX IF NOT EXISTS)
+// so it can become one entry in a versioned migration list without changes.
+// Each index is here because EXPLAIN QUERY PLAN against the real schema showed a
+// full scan, a temp b-tree, or a per-query AUTOMATIC index without it:
+//   idx_reads_visited          recordRead's "latest read" lookup, run on every
+//                              article open (was SCAN + temp b-tree sort)
+//   idx_reads_session_visited  getSessions: pick the newest sessions and load
+//                              just their rows (covering scan, then SEARCH)
+//   idx_reads_slug             getRecentSlugs grouping, the graph's
+//                              EXISTS/DISTINCT over reads, and the title cleanup
+//   idx_annotations_slug       annotations by slug (+ created_at order) and the
+//                              per-row annotation_count subqueries
+// Not added: entries(source) / entries(cached_at). The scope queries must visit
+// every row to count or partition, so an index on a 3-value column changes
+// nothing (plans checked).
+const QUERY_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_reads_visited ON reads(visited_at)',
+  'CREATE INDEX IF NOT EXISTS idx_reads_session_visited ON reads(session_id, visited_at)',
+  'CREATE INDEX IF NOT EXISTS idx_reads_slug ON reads(slug)',
+  'CREATE INDEX IF NOT EXISTS idx_annotations_slug ON annotations(slug, created_at)',
+];
+
+async function applyQueryIndexes(db: SQLite.SQLiteDatabase): Promise<void> {
+  for (const sql of QUERY_INDEXES) {
+    await db.runAsync(sql);
+  }
 }
 
 export async function getEntryCount(): Promise<number> {
@@ -184,11 +215,22 @@ export async function getEntryCount(): Promise<number> {
   return row?.count ?? 0;
 }
 
+// Library scope filter, bound as a parameter. `scope` is typed as a closed union
+// but not guaranteed at runtime: getPrefs casts an untyped meta string, and
+// importUserData can set that string from a sync-folder file. A value outside
+// the union therefore matches no rows instead of being spliced into the SQL.
+function scopeFilter(scope: 'all' | 'sep' | 'owl'): { where: string; params: string[] } {
+  return scope === 'all'
+    ? { where: '', params: [] }
+    : { where: 'WHERE source = ?', params: [scope] };
+}
+
 export async function getEntryCounts(scope: 'all' | 'sep' | 'owl' = 'all'): Promise<{ total: number; cached: number }> {
   const db = await getDb();
-  const where = scope === 'all' ? '' : `WHERE source = '${scope}'`;
+  const { where, params } = scopeFilter(scope);
   const row = await db.getFirstAsync<{ total: number; cached: number }>(
-    `SELECT COUNT(*) AS total, COUNT(cached_at) AS cached FROM entries ${where}`
+    `SELECT COUNT(*) AS total, COUNT(cached_at) AS cached FROM entries ${where}`,
+    params
   );
   return { total: row?.total ?? 0, cached: row?.cached ?? 0 };
 }
@@ -299,33 +341,39 @@ export async function cacheArticle(
   const excerpt = makeExcerpt(data.preamble_html || data.content_html || '', 320);
   const now = Date.now();
 
-  // Preserve the old version record before overwriting
-  const prev = await db.getFirstAsync<{ content_hash: string | null; cached_at: number | null }>(
-    'SELECT content_hash, cached_at FROM entries WHERE slug = ?', [slug]
-  );
-  if (prev?.content_hash && prev?.cached_at) {
+  // One transaction: the old-version record, the row update and the new-version
+  // record must land together. Before, a failure between them could leave
+  // article_versions out of step with entries (e.g. the old article overwritten
+  // but its hash never recorded).
+  await db.withTransactionAsync(async () => {
+    // Preserve the old version record before overwriting
+    const prev = await db.getFirstAsync<{ content_hash: string | null; cached_at: number | null }>(
+      'SELECT content_hash, cached_at FROM entries WHERE slug = ?', [slug]
+    );
+    if (prev?.content_hash && prev?.cached_at) {
+      await db.runAsync(
+        'INSERT OR IGNORE INTO article_versions (slug, content_hash, cached_at) VALUES (?, ?, ?)',
+        [slug, prev.content_hash, prev.cached_at]
+      );
+    }
+
+    await db.runAsync(
+      `UPDATE entries SET
+         author = ?, pub_date = ?, content_hash = ?,
+         toc_html = ?, preamble_html = ?,
+         content_html = ?, notes_html = ?, content_ast = ?, has_math = ?, word_count = ?, excerpt = ?, cached_at = ?
+       WHERE slug = ?`,
+      [data.author ?? null, data.pub_date ?? null, hash,
+       data.toc_html ?? null, data.preamble_html ?? null,
+       data.content_html ?? null, data.notes_html ?? null, data.content_ast ?? null, data.has_math ? 1 : 0, wordCount, excerpt, now, slug]
+    );
+
+    // Record the new version
     await db.runAsync(
       'INSERT OR IGNORE INTO article_versions (slug, content_hash, cached_at) VALUES (?, ?, ?)',
-      [slug, prev.content_hash, prev.cached_at]
+      [slug, hash, now]
     );
-  }
-
-  await db.runAsync(
-    `UPDATE entries SET
-       author = ?, pub_date = ?, content_hash = ?,
-       toc_html = ?, preamble_html = ?,
-       content_html = ?, notes_html = ?, content_ast = ?, has_math = ?, word_count = ?, excerpt = ?, cached_at = ?
-     WHERE slug = ?`,
-    [data.author ?? null, data.pub_date ?? null, hash,
-     data.toc_html ?? null, data.preamble_html ?? null,
-     data.content_html ?? null, data.notes_html ?? null, data.content_ast ?? null, data.has_math ? 1 : 0, wordCount, excerpt, now, slug]
-  );
-
-  // Record the new version
-  await db.runAsync(
-    'INSERT OR IGNORE INTO article_versions (slug, content_hash, cached_at) VALUES (?, ?, ?)',
-    [slug, hash, now]
-  );
+  });
 }
 
 // Persist footnote-page HTML for an already-cached article (lazy backfill for
@@ -447,10 +495,24 @@ export async function getRecentSlugs(limit = 20): Promise<EntrySummary[]> {
 export async function getSessions(limit = 30): Promise<Session[]> {
   const db = await getDb();
 
+  // Bound the read in SQL: pick the newest `limit` sessions (by start time, with
+  // the row id breaking ties the same way the old full-table scan did), then
+  // load only their rows. History only ever grows, so loading every read just
+  // to slice the result in JS got slower with every article opened.
+  const bounded = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 0;
+  if (bounded === 0) return [];
+
   const rows = await db.getAllAsync<ReadRow>(
     `SELECT id, slug, title, visited_at, from_slug, session_id
      FROM reads
-     ORDER BY visited_at ASC`
+     WHERE session_id IN (
+       SELECT session_id FROM reads
+       GROUP BY session_id
+       ORDER BY MIN(visited_at) DESC, MIN(id) DESC
+       LIMIT ?
+     )
+     ORDER BY visited_at ASC, id ASC`,
+    [bounded]
   );
 
   // Group by session_id
@@ -471,8 +533,8 @@ export async function getSessions(limit = 30): Promise<Session[]> {
     });
   }
 
-  // Newest first, limited
-  return sessions.reverse().slice(0, limit);
+  // Newest first (the query already limited which sessions are present)
+  return sessions.reverse();
 }
 
 function buildTree(reads: ReadRow[]): ReadNode[] {
@@ -628,9 +690,10 @@ export async function getSlugsByCacheStatus(scope: 'all' | 'sep' | 'owl' = 'all'
   cached: { slug: string; title: string }[];
 }> {
   const db = await getDb();
-  const where = scope === 'all' ? '' : `WHERE source = '${scope}'`;
+  const { where, params } = scopeFilter(scope);
   const rows = await db.getAllAsync<{ slug: string; title: string; is_cached: number }>(
-    `SELECT slug, title, (cached_at IS NOT NULL) AS is_cached FROM entries ${where}`
+    `SELECT slug, title, (cached_at IS NOT NULL) AS is_cached FROM entries ${where}`,
+    params
   );
   const uncached: { slug: string; title: string }[] = [];
   const cached: { slug: string; title: string }[] = [];
