@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, ActivityIndicator, InteractionManager,
+  View, Text, StyleSheet, ActivityIndicator,
   TouchableOpacity, Share, Linking, Pressable, Animated, ScrollView,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
@@ -19,6 +19,7 @@ import {
 import { makeExcerpt } from '../utils/excerpt';
 import { fetchAndCacheArticle, ensureNotesCached } from '../services/catalog';
 import { primeBackfillForSlugs, primeGraphLayouts } from '../services/inpho';
+import { idleScheduler } from '../services/idleScheduler';
 import { buildArticleHtml } from '../utils/articleTemplate';
 import { parseSepHtml } from '../utils/sepHtml/parse';
 import { collectMathHashes } from '../utils/sepHtml/collectMathHashes';
@@ -301,10 +302,30 @@ export default function ArticleScreen() {
     load();
   }, [slug]);
 
+  // Background work (link indexing, backfills, graph priming) stays paused while
+  // an article is opening so it can't compete with the load/first render.
   async function load(forceRefetch = false) {
+    const release = idleScheduler.hold();
+    try {
+      await loadArticle(forceRefetch);
+    } finally {
+      release();
+    }
+  }
+
+  async function loadArticle(forceRefetch: boolean) {
     setState({ phase: 'loading' });
     setWebReady(false);
     setBacklinkCount(0);
+
+    // These don't depend on the entry, so start them now and let them overlap
+    // with the entry read (and the network fetch on a cold open).
+    const aux = Promise.all([
+      getAnnotationsForSlug(slug),
+      getMeta('custom_css'),
+      getMeta('font_size'),
+    ]);
+    aux.catch(() => {}); // early returns below must not leave an unhandled rejection
 
     let entry = forceRefetch ? null : await getEntry(slug);
 
@@ -323,7 +344,7 @@ export default function ArticleScreen() {
       return;
     }
 
-    const anns = await getAnnotationsForSlug(slug);
+    const [anns, customCss, fontSizeStr] = await aux;
     const currentHash = contentHash(entry.content_html ?? '');
     const valid = anns.filter(a => !a.content_hash || a.content_hash === currentHash || (entry!.content_html ?? '').includes(a.selected_text));
     const stale = anns.filter(a => a.content_hash && a.content_hash !== currentHash && !(entry!.content_html ?? '').includes(a.selected_text));
@@ -334,18 +355,14 @@ export default function ArticleScreen() {
     recordRead(slug, entry.title, fromSlug).catch(() => {});
     // Defer link indexing and InPhO backfill until after the navigation animation
     // completes so they don't compete with article render on the JS thread.
-    InteractionManager.runAfterInteractions(() => {
-      indexLinks(slug, entry.content_html ?? '').catch(() => {});
-      getRecentSlugs(10).then(recent => {
-        const rest = recent.map(r => r.slug).filter(s => s !== slug);
-        primeBackfillForSlugs([slug, ...rest]);
-        primeGraphLayouts([slug, ...rest]);
-      }).catch(() => {});
+    const contentForIndex = entry.content_html ?? '';
+    idleScheduler.schedule(`index-links:${slug}`, () => indexLinks(slug, contentForIndex));
+    idleScheduler.schedule(`prime-inpho:${slug}`, async () => {
+      const recent = await getRecentSlugs(10);
+      const rest = recent.map(r => r.slug).filter(s => s !== slug);
+      await primeBackfillForSlugs([slug, ...rest]);
+      await primeGraphLayouts([slug, ...rest]);
     });
-    const [customCss, fontSizeStr] = await Promise.all([
-      getMeta('custom_css'),
-      getMeta('font_size'),
-    ]);
     const fontSize = fontSizeStr ? parseInt(fontSizeStr, 10) : undefined;
 
     // Show article immediately — don't wait for backlink count.
@@ -398,6 +415,7 @@ export default function ArticleScreen() {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
       if (msg.type === 'progress') {
+        idleScheduler.noteActivity();
         if (typeof msg.value === 'number') setReadProgress(slug, msg.value).catch(() => {});
       } else if (msg.type === 'backlinks') {
         nav.navigate('Graph', { centerSlug: slug, centerTitle: title });
@@ -721,6 +739,7 @@ export default function ArticleScreen() {
               <SepArticle
                 ref={nativeArticleRef}
                 article={nativeArticle}
+                onScrollActivity={idleScheduler.noteActivity}
                 mathSvgs={mathSvgs}
                 header={
                   <View>
