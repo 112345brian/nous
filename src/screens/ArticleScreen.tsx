@@ -18,6 +18,7 @@ import {
 } from '../services/db';
 import { makeExcerpt } from '../utils/excerpt';
 import { fetchAndCacheArticle, ensureNotesCached } from '../services/catalog';
+import { perf } from '../utils/perf';
 import { primeBackfillForSlugs, primeGraphLayouts } from '../services/inpho';
 import { buildArticleHtml } from '../utils/articleTemplate';
 import { parseSepHtml } from '../utils/sepHtml/parse';
@@ -226,8 +227,10 @@ export default function ArticleScreen() {
   useEffect(() => {
     if (!nativeArticle) { setMathSvgs({}); return; }
     const hashes = collectMathHashes(nativeArticle.blocks);
-    if (!hashes.length) return;
-    getMathSvgMap(hashes).then(setMathSvgs).catch(() => {});
+    // Effects run after commit, so this is when SepArticle's first frame was handed to the renderer.
+    perf.mark(slug, 'first-render');
+    if (!hashes.length) { perf.end(slug); return; }
+    perf.time(slug, 'math-svg-map', () => getMathSvgMap(hashes)).then(setMathSvgs).catch(() => {}).finally(() => perf.end(slug));
   }, [nativeArticle]);
 
   // Key on content strings (primitives) rather than the entry object so the
@@ -248,7 +251,8 @@ export default function ArticleScreen() {
     // Fast path: AST was pre-parsed at fetch time — just deserialize.
     if (readyEntry.content_ast) {
       try {
-        setNativeArticle(JSON.parse(readyEntry.content_ast));
+        const ast = readyEntry.content_ast;
+        setNativeArticle(perf.timeSync(slug, 'ast-parse', () => JSON.parse(ast)));
         return;
       } catch { }
     }
@@ -257,7 +261,7 @@ export default function ArticleScreen() {
     let cancelled = false;
     const html = readyEntry.content_html ?? '';
     setTimeout(() => {
-      if (!cancelled) setNativeArticle(parseSepHtml(html));
+      if (!cancelled) setNativeArticle(perf.timeSync(slug, 'ast-parse-slow', () => parseSepHtml(html)));
     }, 0);
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -302,11 +306,12 @@ export default function ArticleScreen() {
   }, [slug]);
 
   async function load(forceRefetch = false) {
+    perf.begin(slug);
     setState({ phase: 'loading' });
     setWebReady(false);
     setBacklinkCount(0);
 
-    let entry = forceRefetch ? null : await getEntry(slug);
+    let entry = forceRefetch ? null : await perf.time(slug, 'get-entry', () => getEntry(slug));
 
     if (!entry?.content_html || forceRefetch) {
       setState({ phase: 'fetching' });
@@ -315,7 +320,7 @@ export default function ArticleScreen() {
         setState({ phase: 'error', message: 'Could not load this article. Check your connection.' });
         return;
       }
-      entry = await getEntry(slug);
+      entry = await perf.time(slug, 'get-entry', () => getEntry(slug));
     }
 
     if (!entry?.content_html) {

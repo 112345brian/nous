@@ -3,6 +3,7 @@ import { linkifyHtml } from '../utils/linkifier';
 import seedEntries from '../assets/entry-seed.json';
 import { renderMathBatch } from './mathRender';
 import { parseSepHtml } from '../utils/sepHtml/parse';
+import { perf } from '../utils/perf';
 
 // 64-bit hash of a TeX equation (or SVG bytes) + display flag. Two independent
 // djb2-xor passes with different seeds; birthday collision at ~2^32 unique inputs
@@ -259,34 +260,35 @@ export async function fetchAndCacheArticle(slug: string, opts: { skipMath?: bool
     const timer = setTimeout(() => controller.abort(), 30_000);
     let res: Response;
     try {
-      res = await fetch(`${BASE}/entries/${slug}/`, { headers: SEP_HEADERS, signal: controller.signal });
+      res = await perf.time(slug, 'fetch', () => fetch(`${BASE}/entries/${slug}/`, { headers: SEP_HEADERS, signal: controller.signal }));
     } finally {
       clearTimeout(timer);
     }
     if (!res.ok) return false;
-    const html = await res.text();
+    const html = await perf.time(slug, 'fetch-body', () => res.text());
 
-    const title = extractTitle(html) ?? slug;
-    const tocHtml = extractById(html, 'toc');
-    const preambleHtml = extractById(html, 'preamble');
-    const rawContentHtml =
-      extractById(html, 'aueditable') || extractById(html, 'article-content');
+    const { title, tocHtml, preambleHtml, rawContentHtml } = perf.timeSync(slug, 'extract', () => ({
+      title: extractTitle(html) ?? slug,
+      tocHtml: extractById(html, 'toc'),
+      preambleHtml: extractById(html, 'preamble'),
+      rawContentHtml: extractById(html, 'aueditable') || extractById(html, 'article-content'),
+    }));
 
     if (!rawContentHtml) return false;
 
     // aueditable starts with <h1> (title) which the template re-adds itself.
     const contentHtml = rawContentHtml.replace(/^\s*<!--[^>]*-->\s*/, '').replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/i, '');
 
-    const linkedHtml = linkifyHtml(contentHtml);
+    const linkedHtml = perf.timeSync(slug, 'linkify', () => linkifyHtml(contentHtml));
     const hasMath = linkedHtml.includes('\\(') || linkedHtml.includes('\\[');
     // Substitute math unless caller opted out (bulk download defers to backfillMathInline).
-    const finalHtml = hasMath && !opts.skipMath ? await substitutemath(linkedHtml) : linkedHtml;
+    const finalHtml = hasMath && !opts.skipMath ? await perf.time(slug, 'math', () => substitutemath(linkedHtml)) : linkedHtml;
     // Footnote text lives on a sibling notes.html page; fetch it so footnotes
     // resolve offline. Only when the body actually references it.
-    const notesHtml = /notes\.html#note/i.test(finalHtml) ? await fetchNotesHtml(slug) : null;
+    const notesHtml = /notes\.html#note/i.test(finalHtml) ? await perf.time(slug, 'notes', () => fetchNotesHtml(slug)) : null;
     // Pre-parse the AST so ArticleScreen can JSON.parse instead of re-parsing HTML.
-    const content_ast = JSON.stringify(parseSepHtml(finalHtml));
-    await cacheArticle(slug, {
+    const content_ast = perf.timeSync(slug, 'parse+stringify', () => JSON.stringify(parseSepHtml(finalHtml)));
+    await perf.time(slug, 'cache-write', () => cacheArticle(slug, {
       author: extractMetaContent(html, 'citation_author') ?? extractAuthor(html),
       pub_date: extractMetaContent(html, 'citation_publication_date'),
       toc_html: tocHtml,
@@ -295,7 +297,7 @@ export async function fetchAndCacheArticle(slug: string, opts: { skipMath?: bool
       notes_html: notesHtml,
       content_ast,
       has_math: hasMath ? 1 : 0,
-    });
+    }));
     // Index outgoing links for graph view
     indexLinks(slug, contentHtml).catch(() => {});
     return true;
