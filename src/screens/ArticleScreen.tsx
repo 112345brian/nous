@@ -31,7 +31,8 @@ import FootnoteSheet from '../components/FootnoteSheet';
 import { parseToc } from '../utils/parseToc';
 import OrphanedAnnotationsBanner from '../components/OrphanedAnnotationsBanner';
 import type { EntryRow, Annotation } from '../types';
-import { contentHash } from '../services/db';
+import { resolveEntryHash } from '../services/db';
+import { partitionAnnotations } from '../utils/annotationValidity';
 import type { RootStackParamList } from '../../App';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'Article'>;
@@ -237,9 +238,9 @@ export default function ArticleScreen() {
     ? `${state.entry.slug}:${state.entry.content_hash ?? 'v0'}`
     : null;
   const readyEntry = state.phase === 'ready' ? state.entry : null;
-  // Memoize so contentHash (50k-char djb2) only runs when the article changes.
-  const contentHtmlForHash = state.phase === 'ready' ? (state.entry.content_html ?? '') : '';
-  const entryContentHash = useMemo(() => contentHtmlForHash ? contentHash(contentHtmlForHash) : '', [contentHtmlForHash]);
+  // Read from the row (stored at cache time); only legacy rows without a stored
+  // hash fall back to rehashing, and useMemo keeps that to once per entry.
+  const entryContentHash = useMemo(() => readyEntry ? resolveEntryHash(readyEntry) : '', [readyEntry]);
   useEffect(() => {
     if (!USE_NATIVE_RENDERER || !readyEntry) {
       setNativeArticle(null);
@@ -324,9 +325,7 @@ export default function ArticleScreen() {
     }
 
     const anns = await getAnnotationsForSlug(slug);
-    const currentHash = contentHash(entry.content_html ?? '');
-    const valid = anns.filter(a => !a.content_hash || a.content_hash === currentHash || (entry!.content_html ?? '').includes(a.selected_text));
-    const stale = anns.filter(a => a.content_hash && a.content_hash !== currentHash && !(entry!.content_html ?? '').includes(a.selected_text));
+    const { valid, stale } = partitionAnnotations(anns, resolveEntryHash(entry), () => entry!.content_html ?? '');
     setAnnotations(valid);
     setOrphaned(stale);
     setOrphanDismissed(false);
@@ -417,7 +416,7 @@ export default function ArticleScreen() {
   async function handleSaveAnnotation(
     text: string, context: string | null, color: string, note: string | null
   ) {
-    const currentHash = state.phase === 'ready' ? contentHash(state.entry.content_html ?? '') : null;
+    const currentHash = entryContentHash || null;
     const ann = await saveAnnotation(slug, text, context, color, note, currentHash);
     const updated = [...annotations, ann];
     setAnnotations(updated);

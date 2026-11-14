@@ -1001,3 +1001,10 @@ export function contentHash(s: string): string {
   }
   return h.toString(16);
 }
+
+// The article's hash for annotation anchoring. `cacheArticle` stores it in
+// `entries.content_hash`, so opening an article reads it back in O(1); only rows
+// cached before that column existed (null/empty) pay for a one-off rehash.
+export function resolveEntryHash(entry: Pick<EntryRow, 'content_hash' | 'content_html'>): string {
+  return entry.content_hash || contentHash(entry.content_html ?? '');
+}
