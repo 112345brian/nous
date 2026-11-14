@@ -1,4 +1,4 @@
-import type { GraphNode, GraphEdge } from '../services/graphDb';
+import type { GraphNode, GraphEdge } from '../types';
 
 export interface LayoutNode extends GraphNode { x: number; y: number; }
 

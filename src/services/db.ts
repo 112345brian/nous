@@ -1,6 +1,11 @@
 import * as SQLite from 'expo-sqlite';
 import type { EntryRow, EntrySummary, ReadRow, ReadNode, Session, Annotation } from '../types';
 import { makeExcerpt } from '../utils/excerpt';
+import { contentHash } from '../utils/contentHash';
+import { formatCitation } from '../utils/citation';
+
+// Re-exported so existing callers (screens, on-device tests) keep importing from services/db.
+export { contentHash, formatCitation };
 
 let _db: SQLite.SQLiteDatabase | null = null;
 
@@ -710,21 +715,6 @@ export function invalidateLinkCache(): void {
 
 // ── Citation ─────────────────────────────────────────────────────────────────
 
-export function formatCitation(entry: Pick<EntryRow, 'slug' | 'title' | 'author' | 'pub_date'>): string {
-  const author = entry.author ?? 'Unknown';
-  const date = entry.pub_date ? formatPubDate(entry.pub_date) : '';
-  const url = `https://plato.stanford.edu/entries/${entry.slug}/`;
-  const dateStr = date ? ` (${date})` : '';
-  return `${author}. "${entry.title}". The Stanford Encyclopedia of Philosophy${dateStr}. Edward N. Zalta and Uri Nodelman (eds.). <${url}>`;
-}
-
-function formatPubDate(raw: string): string {
-  const [year, month] = raw.split('/');
-  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const m = parseInt(month ?? '1') - 1;
-  return `${months[m] ?? ''} ${year ?? ''}`.trim();
-}
-
 // ── Article links (graph view) ────────────────────────────────────────────────
 
 export async function indexLinks(fromSlug: string, contentHtml: string): Promise<void> {
@@ -990,14 +980,4 @@ export async function deleteAnnotations(ids: number[]): Promise<void> {
 
 function countWords(html: string): number {
   return html.replace(/<[^>]*>/g, ' ').trim().split(/\s+/).filter(Boolean).length;
-}
-
-// Fast djb2-style hash — enough to detect article version changes
-export function contentHash(s: string): string {
-  let h = 5381;
-  const len = Math.min(s.length, 50000);
-  for (let i = 0; i < len; i++) {
-    h = (Math.imul(h, 33) ^ s.charCodeAt(i)) >>> 0;
-  }
-  return h.toString(16);
 }
