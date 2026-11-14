@@ -12,6 +12,7 @@
     },
     "plugins": [
       "expo-sqlite",
+      "expo-secure-store",
       "expo-asset",
       [
         "expo-notifications",

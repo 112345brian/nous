@@ -1,6 +1,7 @@
 import * as SQLite from 'expo-sqlite';
 import type { EntryRow, EntrySummary, ReadRow, ReadNode, Session, Annotation } from '../types';
 import { makeExcerpt } from '../utils/excerpt';
+import { secretsAvailable, getSecret, setSecret, deleteSecret } from './secureSecrets';
 
 let _db: SQLite.SQLiteDatabase | null = null;
 
@@ -802,23 +803,58 @@ export async function getBookmarksFull(): Promise<BookmarkRow[]> {
 
 // ── Zotero ───────────────────────────────────────────────────────────────────
 
+// The API key is a secret: it lives in secure storage (secureSecrets.ts), not in
+// the plain `meta` table, so it never reaches DB backups or the sync export.
+// Where secure storage is unavailable (or a write to it fails) it falls back to
+// a `meta` row — still never exported, because exports use SYNCED_PREF_KEYS.
+// A `meta` row therefore means "newer than, or not yet moved to, secure storage":
+// the next read migrates it. Neither Zotero value is synced between devices.
+const ZOTERO_API_KEY = 'zotero_api_key';
+const ZOTERO_USER_ID = 'zotero_user_id';
+
+async function readZoteroApiKey(db: SQLite.SQLiteDatabase): Promise<string> {
+  const legacy = await db.getFirstAsync<{ value: string }>(
+    'SELECT value FROM meta WHERE key = ?', [ZOTERO_API_KEY]
+  );
+  if (!(await secretsAvailable())) return legacy?.value ?? '';
+  if (!legacy) return (await getSecret(ZOTERO_API_KEY)) ?? '';
+
+  // One-time migration out of `meta`. Only drop the plaintext row once the secure
+  // copy reads back identical; otherwise keep it and retry on the next read.
+  const value = legacy.value;
+  const moved = value === ''
+    ? await deleteSecret(ZOTERO_API_KEY)
+    : (await setSecret(ZOTERO_API_KEY, value)) && (await getSecret(ZOTERO_API_KEY)) === value;
+  if (moved) {
+    await db.runAsync('DELETE FROM meta WHERE key = ?', [ZOTERO_API_KEY]);
+    metaCache.delete(ZOTERO_API_KEY);
+  }
+  return value;
+}
+
 export async function getZoteroPrefs(): Promise<{ apiKey: string; userId: string }> {
   const db = await getDb();
-  const rows = await db.getAllAsync<{ key: string; value: string }>(
-    "SELECT key, value FROM meta WHERE key IN ('zotero_api_key', 'zotero_user_id')"
+  const row = await db.getFirstAsync<{ value: string }>(
+    'SELECT value FROM meta WHERE key = ?', [ZOTERO_USER_ID]
   );
-  const m = Object.fromEntries(rows.map(r => [r.key, r.value]));
-  return { apiKey: m['zotero_api_key'] ?? '', userId: m['zotero_user_id'] ?? '' };
+  return { apiKey: await readZoteroApiKey(db), userId: row?.value ?? '' };
 }
 
 export async function saveZoteroPrefs(apiKey: string, userId: string): Promise<void> {
   const db = await getDb();
+  // True once the key is safely out of `meta`.
+  const inSecureStore = (await secretsAvailable())
+    && (apiKey ? await setSecret(ZOTERO_API_KEY, apiKey) : await deleteSecret(ZOTERO_API_KEY));
   await db.withTransactionAsync(async () => {
-    await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('zotero_api_key', ?)", [apiKey]);
     await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('zotero_user_id', ?)", [userId]);
+    if (inSecureStore) {
+      await db.runAsync('DELETE FROM meta WHERE key = ?', [ZOTERO_API_KEY]);
+    } else {
+      await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('zotero_api_key', ?)", [apiKey]);
+    }
   });
-  cacheMeta('zotero_api_key', apiKey);
-  cacheMeta('zotero_user_id', userId);
+  cacheMeta(ZOTERO_USER_ID, userId);
+  metaCache.delete(ZOTERO_API_KEY); // never keep the secret in the in-memory meta cache
 }
 
 // ── Annotations ──────────────────────────────────────────────────────────────
@@ -893,6 +929,16 @@ export interface UserDataExport {
   prefs: Record<string, string>;
 }
 
+// The ONLY `meta` keys that travel in the user-data export (and that an import
+// will write back). This is an allowlist on purpose: `meta` also holds secrets,
+// device-local paths, caches and migration markers, and a new key must never
+// leak into a synced file just because nobody remembered to exclude it. Add a
+// key here only if it is a harmless, user-chosen preference.
+export const SYNCED_PREF_KEYS: readonly string[] = [
+  'pref_home', 'pref_download_all', 'pref_library_scope', 'pref_seed_url',
+  'custom_css', 'font_size', 'auto_sync', 'link_preview', 'graph_visited_only',
+];
+
 export async function exportUserData(): Promise<UserDataExport> {
   const db = await getDb();
   const [reads, bookmarks, annotations, metaRows] = await Promise.all([
@@ -900,7 +946,8 @@ export async function exportUserData(): Promise<UserDataExport> {
     db.getAllAsync<BookmarkRow>('SELECT * FROM bookmarks ORDER BY saved_at ASC'),
     db.getAllAsync<Annotation>('SELECT * FROM annotations ORDER BY created_at ASC'),
     db.getAllAsync<{ key: string; value: string }>(
-      "SELECT key, value FROM meta WHERE key NOT IN ('onboarding_done')"
+      `SELECT key, value FROM meta WHERE key IN (${SYNCED_PREF_KEYS.map(() => '?').join(',')})`,
+      [...SYNCED_PREF_KEYS]
     ),
   ]);
   return {
@@ -949,8 +996,11 @@ export async function importUserData(data: UserDataExport): Promise<void> {
          a.note ?? null, a.color, a.created_at, a.updated_at]
       );
     }
-    // Prefs: merge, remote wins
+    // Prefs: merge, remote wins — allowlisted keys only. Older exports contain the
+    // whole `meta` table (Zotero credentials, sync folder, caches, migration
+    // markers); those are ignored rather than written back.
     for (const [key, value] of Object.entries(data.prefs ?? {})) {
+      if (!SYNCED_PREF_KEYS.includes(key) || typeof value !== 'string') continue;
       await db.runAsync(
         'INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [key, value]
       );
