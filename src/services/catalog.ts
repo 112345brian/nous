@@ -1,4 +1,4 @@
-import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getSlugsByCacheStatus, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, getMathArticleHtml, updateArticleHtml, setArticleAst, getUncachedAstSlugs, getEntry, putMath, getMathSvgMap, setEntryNotes } from './db';
+import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getSlugsByCacheStatus, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, getMathArticleHtml, updateArticleHtml, setArticleAst, getUncachedAstSlugs, getEntryHtml, putMath, getMathSvgMap, setEntryNotes } from './db';
 import { linkifyHtml } from '../utils/linkifier';
 import seedEntries from '../assets/entry-seed.json';
 import { renderMathBatch } from './mathRender';
@@ -133,9 +133,9 @@ export async function backfillAst(): Promise<void> {
     // doesn't monopolize the JS thread and drop frames while the user is active.
     await new Promise<void>(r => setTimeout(r, 32));
     try {
-      const entry = await getEntry(slug);
-      if (!entry?.content_html) continue;
-      const ast = JSON.stringify(parseSepHtml(entry.content_html));
+      const html = await getEntryHtml(slug);
+      if (!html) continue;
+      const ast = JSON.stringify(parseSepHtml(html));
       await setArticleAst(slug, ast);
     } catch { }
   }
