@@ -18,6 +18,7 @@ import {
 } from '../services/db';
 import { makeExcerpt } from '../utils/excerpt';
 import { fetchAndCacheArticle, ensureNotesCached } from '../services/catalog';
+import { startPrefetch } from '../services/prefetch';
 import { primeBackfillForSlugs, primeGraphLayouts } from '../services/inpho';
 import { buildArticleHtml } from '../utils/articleTemplate';
 import { parseSepHtml } from '../utils/sepHtml/parse';
@@ -300,6 +301,14 @@ export default function ArticleScreen() {
     isBookmarked(slug).then(setBookmarked);
     load();
   }, [slug]);
+
+  // Warm a few linked articles once this one is on screen and the reader has
+  // lingered (policy: src/utils/prefetchPolicy.ts). Cancelled on navigation.
+  const isReady = state.phase === 'ready';
+  useEffect(() => {
+    if (!isReady) return;
+    return startPrefetch(slug);
+  }, [slug, isReady]);
 
   async function load(forceRefetch = false) {
     setState({ phase: 'loading' });
