@@ -276,7 +276,7 @@ Observed in the other sessions' worktrees (some of it uncommitted, so it may hav
 
 | Function | What it does | Kind |
 |---|---|---|
-| `backfillMathHashFormat` | Rewrites articles from an earlier build's inline-base64 `<math-i>` format to hash references. Guarded by meta `math_hash_format_v1`. | Upgrade code. By the rule `delete-legacy-compat` wrote into the changelog ("the app is prerelease with no installs to carry forward"), a deletion candidate. That branch still contains it. |
+| `backfillMathHashFormat` | Rewrites articles from an earlier build's inline-base64 `<math-i>` format to hash references. Guarded by meta `math_hash_format_v1`. | Upgrade code. By the rule `delete-legacy-compat` wrote into the changelog ("the app is prerelease with no installs to carry forward"), a deletion candidate. That branch still contains it: its author reports leaving `LEGACY_RE` alone, which is this function's regex, so the deletion has not been decided by anyone yet. |
 | `backfillMathInline` | First calls `resumePendingMath()` (**live**: finishes deferred math interrupted by a kill, every launch), then does a one-time pass (`math_inline_v2`) rendering equations for already-cached articles. The one-time pass exists because "v1 ran before the WebView renderer existed and converted nothing". | Half live, half upgrade code. |
 | `backfillAst` | Pre-parses the AST for cached rows that have none (rows cached before the column existed, or rewritten by a math update: `db.updateArticleHtml` sets `content_ast = NULL`). | Mostly upgrade code; the "rewritten by a math update" case is live. |
 
@@ -320,7 +320,10 @@ in `catalog.ts`. The semantic port is small:
 ### Other overlaps
 
 - `delete-legacy-compat` deletes `syncOnLaunch` (its import and call in `App.tsx`, its definition
-  in `dataSync.ts`). This branch rewrote `dataSync.ts`; resolve by deleting the no-op.
+  in `dataSync.ts`). This branch rewrote `dataSync.ts` down to that no-op plus a comment, so
+  after merging both, delete the file. Its other removals (`getSemanticGraph`,
+  `addColumnIfMissing`, `isDuplicateColumnError`, the Zotero key migration in `db.ts`) are not
+  referenced by `composition.ts` or `src/core`.
 - `tiered-math` changes `substitutemath` (left in `catalog.ts` on purpose).
 - The parent branch (`2fa1958`) has the db merges; this branch does not yet contain them.
 
