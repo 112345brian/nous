@@ -14,6 +14,7 @@ import {
 } from '../services/db';
 import type { Prefs } from '../services/db';
 import { downloadAll, syncCachedArticles } from '../services/catalog';
+import { withDownloadHold } from '../services/mathPriority';
 import type { DownloadProgress } from '../services/catalog';
 import { exportToSyncFolder, importFromSyncFolder } from '../services/dataSync';
 import { importSeedFromUrl } from '../services/seedImport';
@@ -177,7 +178,7 @@ export default function SettingsScreen() {
       async (url) => {
         if (!url?.trim()) return;
         try {
-          await importSeedFromUrl(url.trim(), () => {});
+          await withDownloadHold(() => importSeedFromUrl(url.trim(), () => {}));
           Alert.alert('Done', 'Database imported. Restart the app to apply.');
         } catch (e: any) {
           Alert.alert('Import failed', e?.message ?? 'Unknown error');

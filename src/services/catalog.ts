@@ -1,7 +1,8 @@
 import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getSlugsByCacheStatus, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, getMathArticleHtml, updateArticleHtml, setArticleAst, getUncachedAstSlugs, getEntryHtml, putMath, putMathBatch, getMathSvgMap, setEntryNotes } from './db';
 import { linkifyHtml } from '../utils/linkifier';
 import seedEntries from '../assets/entry-seed.json';
-import { renderMathBatch } from './mathRender';
+import { renderMathChunked } from './mathChunked';
+import { mathSlice, watchStalls, yieldThenMathMayRun, withDownloadHold, MathPriority } from './mathPriority';
 import { parseSepHtml } from '../utils/sepHtml/parse';
 import { perf } from '../utils/perf';
 
@@ -21,10 +22,12 @@ function mathHash(input: string, display: boolean): string {
 }
 
 // Replace all \(…\) and \[…\] TeX math in the raw HTML with compact <math-i>
-// placeholder elements. SVGs are stored in the `math` DB table by hash so
+// placeholder elements. `priority` null = the caller already owns the schedule (the
+// syncCachedArticles awaitMath path runs under its own 'download' hold, so gating on
+// it would wait forever); chunks and slices then only yield a macrotask. SVGs are stored in the `math` DB table by hash so
 // content_html stays small — no inlined base64, no multi-MB HTML.
 const MATH_SUBST_RE = /\\\(([\s\S]*?)\\\)|\\\[([\s\S]*?)\\\]/g;
-async function substitutemath(html: string): Promise<string> {
+async function substitutemath(html: string, priority: MathPriority | null = 'current'): Promise<string> {
   const spots: Array<{ index: number; len: number; tex: string; display: boolean }> = [];
   MATH_SUBST_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
@@ -40,11 +43,13 @@ async function substitutemath(html: string): Promise<string> {
   }
   if (!spots.length) return html;
 
-  const results = await renderMathBatch(spots.map(s => ({ tex: s.tex, display: s.display })));
+  const results = await renderMathChunked(spots.map(s => ({ tex: s.tex, display: s.display })), { priority });
+  const slice = mathSlice(priority);
 
   let out = html;
   const rows: Array<{ hash: string; svg: string; w: number; h: number; display: boolean }> = [];
   for (let i = spots.length - 1; i >= 0; i--) {
+    await slice.checkpoint(); // yield the JS thread when this slice's time budget is spent
     const r = results[i];
     if (!r || r.error || !r.b64) continue;
     const { index, len, display, tex } = spots[i];
@@ -100,14 +105,15 @@ const mathInFlight = new Map<string, Promise<boolean>>();
 // `html` may be passed when the caller already holds it (skips a DB read).
 // Resolves true when the article no longer needs math work; false when the
 // renderer made no progress (it stays pending and is retried at next launch).
-export function completeArticleMath(slug: string, html?: string): Promise<boolean> {
+export function completeArticleMath(slug: string, html?: string, priority: MathPriority = 'current'): Promise<boolean> {
   const existing = mathInFlight.get(slug);
   if (existing) return existing;
+  const stopWatch = watchStalls(`math:${slug}`); // dev-only; no-op in release
   const p = (async () => {
     try {
       const src = html ?? (await getEntryHtml(slug));
       if (!src) return false;
-      const updated = await substitutemath(src);
+      const updated = await substitutemath(src, priority);
       if (updated === src) {
         // Nothing converted. Fine if there was no TeX; otherwise the renderer
         // timed out — keep it pending.
@@ -124,6 +130,7 @@ export function completeArticleMath(slug: string, html?: string): Promise<boolea
       return false;
     } finally {
       mathInFlight.delete(slug);
+      stopWatch();
     }
   })();
   mathInFlight.set(slug, p);
@@ -141,8 +148,9 @@ export async function resumePendingMath(): Promise<void> {
     return;
   }
   for (const slug of slugs) {
-    await new Promise<void>(r => setTimeout(r, 32));
-    await completeArticleMath(slug);
+    // One article per unit; stops here (slug stays in math_pending) while the reader is active.
+    await yieldThenMathMayRun('background');
+    await completeArticleMath(slug, undefined, 'background');
   }
 }
 
@@ -201,10 +209,13 @@ export async function backfillMathInline(): Promise<void> {
   if (done) return;
   const articles = await getMathArticleHtml();
   for (const article of articles) {
-    await new Promise<void>(r => setTimeout(r, 0));
+    await yieldThenMathMayRun('background');
     try {
-      const updated = await substitutemath(article.content_html);
-      if (updated !== article.content_html) {
+      // Re-read: the snapshot above may be hours old if we were paused, and a
+      // reader-triggered completion may have rewritten this article since.
+      const current = (await getEntryHtml(article.slug)) ?? article.content_html;
+      const updated = await substitutemath(current, 'background');
+      if (updated !== current) {
         await updateArticleHtml(article.slug, updated);
       }
     } catch {
@@ -219,9 +230,9 @@ export async function backfillMathInline(): Promise<void> {
 export async function backfillAst(): Promise<void> {
   const slugs = await getUncachedAstSlugs();
   for (const slug of slugs) {
-    // Yield one animation frame between parses so background AST generation
-    // doesn't monopolize the JS thread and drop frames while the user is active.
-    await new Promise<void>(r => setTimeout(r, 32));
+    // One article per unit: yield a macrotask, and stop while the reader is
+    // active or a download is running (the work list is re-derived from the DB).
+    await yieldThenMathMayRun('background');
     try {
       const html = await getEntryHtml(slug);
       if (!html) continue;
@@ -285,10 +296,18 @@ export type DownloadProgress = {
   current: string;
 };
 
-export async function downloadAll(
+export function downloadAll(
   onProgress: (p: DownloadProgress) => void,
   signal?: AbortSignal,
   scope: 'all' | 'sep' | 'owl' = 'all'
+): Promise<void> {
+  return withDownloadHold(() => downloadAllUnheld(onProgress, signal, scope));
+}
+
+async function downloadAllUnheld(
+  onProgress: (p: DownloadProgress) => void,
+  signal: AbortSignal | undefined,
+  scope: 'all' | 'sep' | 'owl'
 ): Promise<void> {
   const { uncached, cached } = await getSlugsByCacheStatus(scope);
   // Report progress against the full library so a resumed download shows
@@ -321,9 +340,16 @@ export async function downloadAll(
   }
 }
 
-export async function syncCachedArticles(
+export function syncCachedArticles(
   onProgress: (p: DownloadProgress) => void,
   signal?: AbortSignal
+): Promise<void> {
+  return withDownloadHold(() => syncCachedArticlesUnheld(onProgress, signal));
+}
+
+async function syncCachedArticlesUnheld(
+  onProgress: (p: DownloadProgress) => void,
+  signal: AbortSignal | undefined
 ): Promise<void> {
   await refreshIndexIfStale();
   const slugs = await getCachedSlugs();
@@ -382,7 +408,7 @@ export async function fetchAndCacheArticle(
     const hasMath = linkedHtml.includes('\\(') || linkedHtml.includes('\\[');
     // Substitute math unless caller opted out (bulk download defers to backfillMathInline).
     const deferMath = hasMath && !opts.skipMath && !opts.awaitMath;
-    const finalHtml = hasMath && !opts.skipMath && opts.awaitMath ? await perf.time(slug, 'math', () => substitutemath(linkedHtml)) : linkedHtml;
+    const finalHtml = hasMath && !opts.skipMath && opts.awaitMath ? await perf.time(slug, 'math', () => substitutemath(linkedHtml, null)) : linkedHtml;
     // Footnote text lives on a sibling notes.html page; fetch it so footnotes
     // resolve offline. Only when the body actually references it.
     const notesHtml = /notes\.html#note/i.test(finalHtml) ? await perf.time(slug, 'notes', () => fetchNotesHtml(slug)) : null;
