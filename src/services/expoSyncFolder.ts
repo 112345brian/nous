@@ -3,6 +3,21 @@
 import { File, Directory, Paths } from 'expo-file-system';
 import type { SyncFolder } from '../core/ports';
 
+/**
+ * What "~" means on-device: the app's Documents directory (file:// URI, no trailing slash).
+ * An iOS app is sandboxed, so the POSIX $HOME is not a place the reader can see or share,
+ * and React Native's process.env has no HOME anyway. Documents is the one container
+ * directory the Files app can expose. Needs a device check: confirm `~/Sync` lands in
+ * Files > On My iPhone > Nous. Returns '' if the platform reports no document directory.
+ */
+export function expoSyncHome(): string {
+  try {
+    return (Paths.document?.uri ?? '').replace(/\/+$/, '');
+  } catch {
+    return '';
+  }
+}
+
 export const expoSyncFolder: SyncFolder = {
   async read(fileUri) {
     const file = new File(fileUri);

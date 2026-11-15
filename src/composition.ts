@@ -30,7 +30,7 @@ import { loadMathJaxScript } from './services/mathRender';
 import { createMathBridge } from './core/mathBridge';
 import type { MathRenderer } from './core/ports';
 import { watchStalls, highResNow } from './services/stallWatch';
-import { expoSyncFolder } from './services/expoSyncFolder';
+import { expoSyncFolder, expoSyncHome } from './services/expoSyncFolder';
 import { zoteroHttp } from './services/zoteroHttp';
 import { netInfoConnectivity, rnInteractions } from './services/prefetch';
 import { createPlatformProgressSink } from './services/downloadNotification';
@@ -196,7 +196,7 @@ function syncDeps() {
     store: dbUserData,
     env: {
       platform: Platform.OS as string,
-      home: (process.env as Record<string, string | undefined>).HOME ?? '',
+      home: expoSyncHome(),
     },
   };
 }

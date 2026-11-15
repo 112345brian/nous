@@ -40,7 +40,7 @@ jest.mock('expo-file-system', () => {
     get exists() { return mockDirs.has(this.uri); }
     create() { mockOps.push(`mkdir ${this.uri}`); mockDirs.add(this.uri); }
   }
-  return { File, Directory, Paths: { cache: 'file:///cache/' } };
+  return { File, Directory, Paths: { cache: 'file:///cache/', document: { uri: 'file:///docs/' } } };
 });
 
 jest.mock('../db', () => require('./helpers/mockDbModule').asDbModule({
@@ -88,13 +88,13 @@ describe('exportToSyncFolder', () => {
     expect(mockFiles.has(DEST)).toBe(true);
   });
 
-  test('expands ~ using $HOME on ios/macos', async () => {
+  test('expands ~ to the app document directory, ignoring process.env.HOME', async () => {
     const prev = process.env.HOME;
     process.env.HOME = '/home/tester';
     m.getSyncFolder.mockResolvedValue('~/Sync' as any);
     expect(await exportToSyncFolder()).toBe('ok');
-    expect(mockFiles.has('file:///home/tester/Sync/sep_user.json')).toBe(true);
     process.env.HOME = prev;
+    expect(mockFiles.has('file:///docs/Sync/sep_user.json')).toBe(true);
   });
 
   test('failure reading the data or writing the file -> error', async () => {
