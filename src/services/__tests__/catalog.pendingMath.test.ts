@@ -112,8 +112,8 @@ describe('bulk downloads', () => {
 
   test('after downloadAll the pending list drains', async () => {
     await downloadAll(() => {});
-    await new Promise(r => setTimeout(r, 1500));
-    for (let i = 0; i < 50 && JSON.parse(mockMeta.math_pending).length; i++) await new Promise(r => setTimeout(r, 200));
+    await new Promise<void>(r => setTimeout(() => r(), 1500));
+    for (let i = 0; i < 50 && JSON.parse(mockMeta.math_pending).length; i++) await new Promise<void>(r => setTimeout(() => r(), 200));
     expect(JSON.parse(mockMeta.math_pending)).toEqual([]);
     expect(mockEntries.a.content_html).toContain('<math-i ');
   });
