@@ -1,34 +1,27 @@
-// The ONE place that connects prewarmCommonMath to the real app: db, catalog's
-// hash, the WebView renderer and the idle scheduler. App.tsx calls
-// scheduleCommonMathPrewarm() once after first launch's essential work.
+// The ONE place that connects prewarmCommonMath to the app: db meta (the stamp),
+// mathCache.ensureMath at the lowest priority, and the idle scheduler.
+// App.tsx calls scheduleCommonMathPrewarm() once, after the other idle tasks.
 //
-// Scheduling (plain scheduler API on this branch): each chunk is its own
-// scheduler task that re-schedules the next one, so the scheduler's hold() /
-// noteActivity() gates EVERY chunk (never during an article open or a scroll).
-// TO SWITCH to the priority API (math-throttle branch: whenMayRun /
-// yieldThenMayRun, MathPriority 'background'): schedule ONE task and pass
-//   beforeChunk: () => idleScheduler.yieldThenMayRun('background')
-// to prewarmCommonMath instead of maxChunks:1 + rescheduling (see the
-// "PRIORITY SWITCH" note below). Nothing else changes.
+// Never-during-reading/scroll/download is not re-implemented here: the task
+// starts only when the scheduler is idle, and ensureMath(…, 'background') awaits
+// the priority model (src/utils/mathThrottlePolicy.ts) before every chunk, so a
+// reading or download hold, or recent scroll/touch, pauses it at the next chunk
+// boundary. The priority must stay 'background' (a test guards this).
 
 import { COMMON_MATH, commonMathStamp } from '../data/commonMath';
-import { getMeta, getMathSvgMap, putMathBatch, setMeta } from './db';
-import { mathHash } from './catalog';
-import { renderMathBatch } from './mathRender';
+import { getMeta, setMeta } from './db';
+import { ensureMath } from './mathCache';
 import { idleScheduler } from './idleScheduler';
 import { prewarmCommonMath, PrewarmDeps } from './prewarmCommonMath';
 
 export const COMMON_MATH_META_KEY = 'common_math_prewarm';
-const TASK_KEY = 'prewarm-common-math';
+export const COMMON_MATH_TASK_KEY = 'prewarm-common-math';
 
 export function realPrewarmDeps(): PrewarmDeps {
   return {
     list: COMMON_MATH,
     stamp: commonMathStamp(),
-    hash: mathHash,
-    getCachedSvgMap: getMathSvgMap,
-    render: renderMathBatch,
-    putBatch: putMathBatch,
+    ensure: spots => ensureMath(spots, 'background'),
     getStamp: () => getMeta(COMMON_MATH_META_KEY),
     setStamp: s => setMeta(COMMON_MATH_META_KEY, s),
   };
@@ -37,17 +30,6 @@ export function realPrewarmDeps(): PrewarmDeps {
 export function scheduleCommonMathPrewarm(
   scheduler: Pick<typeof idleScheduler, 'schedule'> = idleScheduler,
   deps: PrewarmDeps = realPrewarmDeps(),
-): void {
-  const step = async (): Promise<void> => {
-    const r = await prewarmCommonMath(deps, { maxChunks: 1 });
-    // Continue only while progress is being made; a failed/empty chunk ends the
-    // run (stamp stays unset, so the next launch retries just the missing ones).
-    if (r.status === 'partial' && r.rendered > 0 && r.remaining > r.failed) {
-      scheduler.schedule(TASK_KEY, step);
-    }
-  };
-  // PRIORITY SWITCH (after math-throttle merges): replace the body above with
-  //   scheduler.schedule(TASK_KEY, () => prewarmCommonMath({ ...deps,
-  //     beforeChunk: () => idleScheduler.yieldThenMayRun('background') }));
-  scheduler.schedule(TASK_KEY, step);
+): boolean {
+  return scheduler.schedule(COMMON_MATH_TASK_KEY, () => prewarmCommonMath(deps));
 }

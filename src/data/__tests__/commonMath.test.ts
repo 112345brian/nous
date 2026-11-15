@@ -1,8 +1,9 @@
 import { COMMON_MATH, commonMathStamp } from '../commonMath';
+import { mathHash, normalizeTex } from '../../utils/mathKey';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { texToSvg } = require('../../../scripts/renderMath.cjs');
 
-const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
+const norm = normalizeTex;
 
 describe('COMMON_MATH', () => {
   it('has 100-300 entries', () => {
@@ -19,6 +20,15 @@ describe('COMMON_MATH', () => {
       seen.add(k);
     }
     expect(dups).toEqual([]);
+  });
+
+  it('has no duplicate cache keys (mathHash)', () => {
+    const seen = new Set(COMMON_MATH.map(e => mathHash(e.tex, e.display)));
+    expect(seen.size).toBe(COMMON_MATH.length);
+  });
+
+  it('has entries already in normalizeTex form (stored as authored)', () => {
+    expect(COMMON_MATH.filter(e => normalizeTex(e.tex) !== e.tex).map(e => e.tex)).toEqual([]);
   });
 
   it('has well-formed entries', () => {

@@ -10,7 +10,7 @@
 
 import type * as SQLite from 'expo-sqlite';
 import { getDb } from './db';
-import { addColumnIfMissing, runMigrations, tableVersionStore, type Migration } from './migrations';
+import { runMigrations, tableVersionStore, type Migration } from './migrations';
 import { getInfluenceWeight } from '../data/influenceWeights';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -46,16 +46,13 @@ export type GraphView = 'links' | GraphMode;
 // (the core schema owns PRAGMA user_version). See services/migrations.ts.
 const GRAPH_MIGRATIONS: readonly Migration[] = [
   {
-    // Everything that existed before graph schema versioning. Adopts installs
-    // whose tables predate the date columns: only a duplicate-column error is
-    // ignored when adding them.
     version: 1,
     name: 'InPhO tables and layout cache',
     async up(db) {
       await db.execAsync(`
     -- InPhO semantic index (ideas + thinkers), synced per-client from
     -- inphoproject.org. sep_dir joins to entries.slug. See services/inpho.ts.
-    CREATE TABLE IF NOT EXISTS inpho_nodes (
+    CREATE TABLE inpho_nodes (
       id            INTEGER NOT NULL,
       kind          TEXT NOT NULL,        -- 'idea' | 'thinker'
       label         TEXT NOT NULL,
@@ -65,11 +62,11 @@ const GRAPH_MIGRATIONS: readonly Migration[] = [
       dates_checked INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (kind, id)
     );
-    CREATE INDEX IF NOT EXISTS idx_inpho_sep ON inpho_nodes(sep_dir);
+    CREATE INDEX idx_inpho_sep ON inpho_nodes(sep_dir);
 
     -- Per-entry resolved relations, cached after a one-off /idea|thinker/{id}
     -- fetch. payload = JSON { ideas, thinkers, influence? }.
-    CREATE TABLE IF NOT EXISTS inpho_relations (
+    CREATE TABLE inpho_relations (
       slug       TEXT PRIMARY KEY,
       payload    TEXT NOT NULL,
       fetched_at INTEGER NOT NULL
@@ -78,7 +75,7 @@ const GRAPH_MIGRATIONS: readonly Migration[] = [
     -- Settled force-layout positions, keyed by article+mode+node-set hash.
     -- positions = JSON [{slug, xRel, yRel}] where xRel/yRel are 0-1 fractions
     -- of canvas dimensions so the cache survives screen rotation / device changes.
-    CREATE TABLE IF NOT EXISTS graph_layout_cache (
+    CREATE TABLE graph_layout_cache (
       center_slug  TEXT NOT NULL,
       mode         TEXT NOT NULL,
       layout_key   INTEGER NOT NULL,
@@ -87,9 +84,6 @@ const GRAPH_MIGRATIONS: readonly Migration[] = [
       PRIMARY KEY (center_slug, mode)
     );
   `);
-      await addColumnIfMissing(db, 'inpho_nodes', 'birth_year INTEGER');
-      await addColumnIfMissing(db, 'inpho_nodes', 'death_year INTEGER');
-      await addColumnIfMissing(db, 'inpho_nodes', 'dates_checked INTEGER NOT NULL DEFAULT 0');
     },
   },
 ];

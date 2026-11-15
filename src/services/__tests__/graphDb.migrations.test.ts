@@ -38,22 +38,6 @@ describe('graph schema', () => {
     expect(graphVersion(r)).toBe(1);
   });
 
-  it('adopts tables created before the date columns existed, keeping their rows', async () => {
-    await db.getDb();
-    const r = fake.raw();
-    r.exec(`
-      CREATE TABLE inpho_nodes (
-        id INTEGER NOT NULL, kind TEXT NOT NULL, label TEXT NOT NULL, sep_dir TEXT,
-        PRIMARY KEY (kind, id)
-      );
-      INSERT INTO inpho_nodes (id, kind, label, sep_dir) VALUES (1, 'thinker', 'Plato', 'plato');
-    `);
-    await expect(graph.inphoIndexCount()).resolves.toBe(1);
-    expect(columns(r, 'inpho_nodes')).toEqual(expect.arrayContaining(['birth_year', 'death_year', 'dates_checked']));
-    expect(r.prepare('SELECT dates_checked FROM inpho_nodes').get().dates_checked).toBe(0);
-    expect(graphVersion(r)).toBe(1);
-  });
-
   it('does not run schema SQL again once recorded', async () => {
     await graph.inphoIndexCount();
     await db.closeDb(); // a new handle re-checks the recorded version, nothing more
@@ -75,7 +59,7 @@ describe('graph schema', () => {
   it('does not cache a failed setup: it is rolled back and retried', async () => {
     let n = 0;
     fake.state.failSql = (sql: string) =>
-      (sql.includes('CREATE TABLE IF NOT EXISTS inpho_nodes') && n++ === 0 ? new Error('boom') : null);
+      (sql.includes('CREATE TABLE inpho_nodes') && n++ === 0 ? new Error('boom') : null);
     await expect(graph.inphoIndexCount()).rejects.toThrow(/boom/);
     expect(tables(fake.raw())).not.toContain('inpho_nodes');
     expect(graphVersion(fake.raw())).toBeUndefined();

@@ -6,7 +6,7 @@
 // expo-secure-store supports Android, iOS and tvOS only. Where it is missing
 // (e.g. the react-native-macos target, which has no Expo modules, or a binary
 // built before this dependency was added) `secretsAvailable()` is false and
-// callers fall back to their old storage. Every function here swallows errors
+// callers fall back to the plain meta table. Every function here swallows errors
 // and reports failure through its return value so a secure-storage problem can
 // never break the caller's main flow.
 //

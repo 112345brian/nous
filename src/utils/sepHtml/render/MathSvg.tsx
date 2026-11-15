@@ -1,7 +1,7 @@
 import React from 'react';
 import { Text, View } from 'react-native';
 import { SvgXml } from 'react-native-svg';
-import { SEP_BASE_FONT, SEP_COLORS } from './theme';
+import { SEP_COLORS, useSepTheme } from './theme';
 
 // An equation rendered to SVG on this device (mathStore.resolveMath), cached in
 // memory and in the local `math` table. Never a bundled/build-time asset.
@@ -17,10 +17,6 @@ export interface ResolvedMath {
 // this runtime, or an un-renderable equation), in which case we show raw TeX.
 export type MathResolver = (tex: string, display: boolean) => ResolvedMath | null;
 
-// MathJax sized our SVGs with ex:8 against em:16. The reader runs at 17px, so
-// scale ex->px proportionally: 1ex ≈ fontSize/2.
-const PX_PER_EX = SEP_BASE_FONT / 2;
-
 // react-native-svg honors `color` for `currentColor` fills, so the equation
 // inherits the reader's text color and any future theme.
 function svgWithColor(svg: string): string {
@@ -35,6 +31,7 @@ interface Props {
 }
 
 export function MathSvg({ tex, display, resolve, color = SEP_COLORS.text }: Props) {
+  const { pxPerEx, inline } = useSepTheme();
   const r = resolve(tex, display);
 
   // Fallback: no stored SVG (live fetch or an un-renderable equation such as the
@@ -42,14 +39,14 @@ export function MathSvg({ tex, display, resolve, color = SEP_COLORS.text }: Prop
   // for those cases that reads correctly.
   if (!r) {
     return (
-      <Text style={{ fontFamily: 'monospace', color, fontSize: SEP_BASE_FONT * 0.95 }}>
+      <Text style={{ fontFamily: 'monospace', color, fontSize: inline.mathFallback }}>
         {tex}
       </Text>
     );
   }
 
-  const width = Math.max(1, Math.round(r.w * PX_PER_EX));
-  const height = Math.max(1, Math.round(r.h * PX_PER_EX));
+  const width = Math.max(1, Math.round(r.w * pxPerEx));
+  const height = Math.max(1, Math.round(r.h * pxPerEx));
 
   if (display) {
     return (

@@ -5,7 +5,8 @@
     "name": "Nous",
     "slug": "nous",
     "version": "0.6.5",
-    "orientation": "portrait",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
     "android": {
       "package": "com.nous.app",
       "versionCode": 12

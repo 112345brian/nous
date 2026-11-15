@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, LogBox } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, LogBox, StatusBar } from 'react-native';
 
 LogBox.ignoreAllLogs();
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -8,14 +8,17 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { NavigationContainerRef } from '@react-navigation/native';
 import { getEntryCount, getMeta, getPrefs, getRecentSlugs, savePrefs } from './src/services/db';
+import { ThemeProvider, useScheme, withTheme } from './src/theme/ThemeProvider';
+import { withWideFrame } from './src/components/WideFrame';
+import { isReduceMotion } from './src/utils/motion';
 import { APP_ACCENT } from './src/utils/sepHtml/render/theme';
-import { syncOnLaunch } from './src/services/dataSync';
 import { importSeedFromUrl } from './src/services/seedImport';
 import type { SeedPhase } from './src/services/seedImport';
 import { backfillAst, backfillMathHashFormat, backfillMathInline, downloadAll, refreshIndexIfStale, syncCachedArticles } from './src/services/catalog';
 import { preloadMathJax } from './src/services/mathRender';
 import { idleScheduler } from './src/services/idleScheduler';
 import { scheduleCommonMathPrewarm } from './src/services/commonMathWiring';
+import { withDownloadHold } from './src/services/mathPriority';
 import type { Prefs } from './src/services/db';
 import { IS_TEST_BUILD } from './src/testConfig';
 import MathRenderWebView from './src/components/MathRenderWebView';
@@ -30,9 +33,10 @@ import AnnotationsScreen from './src/screens/AnnotationsScreen';
 import GraphScreen from './src/screens/GraphScreen';
 import LoadingArticleScreen from './src/screens/LoadingArticleScreen';
 import { startDownloadNotification, updateDownloadNotification, finishDownloadNotification } from './src/services/downloadNotification';
+import { colors, themedStyles, palettes, type Scheme } from './src/theme/tokens';
 
 export type RootStackParamList = {
-  Home: undefined;
+  Home: { openSearch?: boolean } | undefined;
   Article: { slug: string; title: string; fromSlug?: string };
   History: undefined;
   ReadingList: undefined;
@@ -42,6 +46,16 @@ export type RootStackParamList = {
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+
+// Centre the list-style screens in a readable column on wide windows.
+const FramedHome = withTheme(withWideFrame(HomeScreen));
+const FramedHistory = withTheme(withWideFrame(HistoryScreen));
+const FramedReadingList = withTheme(withWideFrame(ReadingListScreen));
+const FramedSettings = withTheme(withWideFrame(SettingsScreen));
+const FramedAnnotations = withTheme(withWideFrame(AnnotationsScreen));
+// The reader re-renders without remounting, so a scheme change keeps its scroll position.
+const ThemedArticle = withTheme(ArticleScreen, false);
+const ThemedGraph = withTheme(GraphScreen);
 
 // Android 16 forces edge-to-edge: the app draws behind the translucent status
 // and navigation bars, so scrolling content bleeds through them. These opaque
@@ -57,20 +71,11 @@ function SystemBarScrim() {
     </>
   );
 }
-const barStyles = StyleSheet.create({
-  bar: { position: 'absolute', left: 0, right: 0, backgroundColor: '#111', zIndex: 50 },
-});
+const barStyles = themedStyles(() => StyleSheet.create({
+  bar: { position: 'absolute', left: 0, right: 0, backgroundColor: colors.bg, zIndex: 50 },
+}));
 
-const THEME = {
-  dark: true,
-  colors: {
-    primary: APP_ACCENT,
-    background: '#121212',
-    card: '#121212',
-    text: '#e8e8e8',
-    border: '#2a2a2a',
-    notification: APP_ACCENT,
-  },
+const NAV_FONTS = {
   fonts: {
     regular: { fontFamily: 'System', fontWeight: '400' as const },
     medium: { fontFamily: 'System', fontWeight: '500' as const },
@@ -79,9 +84,41 @@ const THEME = {
   },
 };
 
+function navTheme(scheme: Scheme) {
+  const c = palettes[scheme];
+  return {
+    dark: scheme === 'dark',
+    colors: {
+      primary: scheme === 'dark' ? APP_ACCENT : c.accent,
+      background: c.bg,
+      card: c.bg,
+      text: c.text,
+      border: c.border,
+      notification: scheme === 'dark' ? APP_ACCENT : c.accent,
+    },
+    ...NAV_FONTS,
+  };
+}
+
+// Status-bar glyphs must contrast with the scheme's background.
+function ThemedStatusBar() {
+  const { scheme } = useScheme();
+  return <StatusBar barStyle={scheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={colors.bg} />;
+}
+
 type AppPhase = 'booting' | 'onboarding' | 'seeding' | 'seed_error' | 'indexing' | 'index_error' | 'ready';
 
 export default function App() {
+  return (
+    <ThemeProvider>
+      <ThemedStatusBar />
+      <AppInner />
+    </ThemeProvider>
+  );
+}
+
+function AppInner() {
+  const { scheme } = useScheme(); // re-render the shell when the scheme changes
   if (IS_TEST_BUILD) {
     return (
       <SafeAreaProvider>
@@ -108,8 +145,6 @@ export default function App() {
   }
 
   async function initialize(prefs: Prefs) {
-    syncOnLaunch();
-
     const count = await getEntryCount();
 
     if (count === 0) {
@@ -186,7 +221,7 @@ export default function App() {
     if (prefs.seedUrl) {
       setPhase('seeding');
       try {
-        await importSeedFromUrl(prefs.seedUrl, p => setSeedPhase(p));
+        await withDownloadHold(() => importSeedFromUrl(prefs.seedUrl, p => setSeedPhase(p)));
       } catch {
         setPhase('seed_error');
         return;
@@ -265,23 +300,23 @@ export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <NavigationContainer theme={THEME} ref={navRef}>
+        <NavigationContainer theme={navTheme(scheme)} ref={navRef}>
           <Stack.Navigator
             id="root"
             screenOptions={{
               headerShown: false,
               // Native Android swipe-back is unreliable here (3-button nav, no
               // edge gesture); ArticleScreen implements its own edge-swipe Pan.
-              animation: 'slide_from_right',
+              animation: isReduceMotion() ? 'fade' : 'slide_from_right',
             }}
           >
-            <Stack.Screen name="Home" component={HomeScreen} />
-            <Stack.Screen name="Article" component={ArticleScreen} />
-            <Stack.Screen name="History" component={HistoryScreen} />
-            <Stack.Screen name="ReadingList" component={ReadingListScreen} />
-            <Stack.Screen name="Settings" component={SettingsScreen} />
-            <Stack.Screen name="Annotations" component={AnnotationsScreen} />
-            <Stack.Screen name="Graph" component={GraphScreen} />
+            <Stack.Screen name="Home" component={FramedHome} />
+            <Stack.Screen name="Article" component={ThemedArticle} />
+            <Stack.Screen name="History" component={FramedHistory} />
+            <Stack.Screen name="ReadingList" component={FramedReadingList} />
+            <Stack.Screen name="Settings" component={FramedSettings} />
+            <Stack.Screen name="Annotations" component={FramedAnnotations} />
+            <Stack.Screen name="Graph" component={ThemedGraph} />
           </Stack.Navigator>
         </NavigationContainer>
         {/* Opaque backdrop behind the translucent system bars (edge-to-edge) */}
@@ -292,10 +327,10 @@ export default function App() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   boot: {
     flex: 1,
-    backgroundColor: '#111',
+    backgroundColor: colors.bg,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -306,14 +341,14 @@ const styles = StyleSheet.create({
     letterSpacing: 6,
   },
   bootError: {
-    color: '#888',
+    color: colors.textMuted,
     fontSize: 14,
     textAlign: 'center',
     marginTop: 24,
     lineHeight: 22,
   },
   bootLabel: {
-    color: '#555',
+    color: colors.textMuted,
     fontSize: 13,
     marginTop: 12,
   },
@@ -321,7 +356,7 @@ const styles = StyleSheet.create({
     width: 200,
     height: 2,
     borderRadius: 1,
-    backgroundColor: '#1e1e1e',
+    backgroundColor: colors.surface,
     overflow: 'hidden',
     marginTop: 32,
   },
@@ -330,5 +365,5 @@ const styles = StyleSheet.create({
     borderRadius: 1,
     backgroundColor: APP_ACCENT,
   },
-});
+}));
 

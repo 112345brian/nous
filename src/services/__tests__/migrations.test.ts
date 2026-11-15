@@ -113,33 +113,3 @@ describe('tableVersionStore', () => {
     expect(await m.tableVersionStore('a').get(db)).toBe(2);
   });
 });
-
-describe('addColumnIfMissing', () => {
-  beforeEach(async () => {
-    await db.execAsync('CREATE TABLE things (id INTEGER PRIMARY KEY, name TEXT)');
-  });
-
-  it('adds a missing column', async () => {
-    await m.addColumnIfMissing(db, 'things', 'color TEXT');
-    const cols = fake.raw('test.db').prepare('PRAGMA table_info(things)').all().map((c: any) => c.name);
-    expect(cols).toContain('color');
-  });
-
-  it('ignores a column that already exists', async () => {
-    await expect(m.addColumnIfMissing(db, 'things', 'name TEXT')).resolves.toBeUndefined();
-  });
-
-  it('does not ignore any other failure', async () => {
-    await expect(m.addColumnIfMissing(db, 'no_such_table', 'x TEXT')).rejects.toThrow(/no such table/);
-    fake.state.failSql = () => new Error('database or disk is full');
-    await expect(m.addColumnIfMissing(db, 'things', 'y TEXT')).rejects.toThrow(/disk is full/);
-  });
-
-  it('recognises the duplicate-column error across realms and message wording', () => {
-    expect(m.isDuplicateColumnError(new Error('duplicate column name: pub_date'))).toBe(true);
-    expect(m.isDuplicateColumnError({ message: 'Duplicate Column Name: x' })).toBe(true);
-    expect(m.isDuplicateColumnError(new Error('no such table: t'))).toBe(false);
-    expect(m.isDuplicateColumnError('boom')).toBe(false);
-    expect(m.isDuplicateColumnError(null)).toBe(false);
-  });
-});

@@ -114,25 +114,3 @@ function errorMessage(e: unknown): string {
   const m = (e as { message?: unknown } | null)?.message;
   return typeof m === "string" ? m : String(e);
 }
-
-export function isDuplicateColumnError(e: unknown): boolean {
-  return /duplicate column name/i.test(errorMessage(e));
-}
-
-/**
- * ALTER TABLE ... ADD COLUMN for steps that adopt installs created before
- * versioning, where the column may already exist. Only the "already there"
- * error is ignored; anything else (disk full, missing table, locked) fails
- * the step so it is retried instead of leaving a half-migrated schema.
- */
-export async function addColumnIfMissing(
-  db: SQLiteDatabase,
-  table: string,
-  columnDef: string,
-): Promise<void> {
-  try {
-    await db.runAsync(`ALTER TABLE ${table} ADD COLUMN ${columnDef}`);
-  } catch (e) {
-    if (!isDuplicateColumnError(e)) throw e;
-  }
-}

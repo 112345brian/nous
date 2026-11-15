@@ -8,7 +8,7 @@
  * Flow:
  *   1. ensureInphoIndex() — one-off (refreshable) download of the idea + thinker
  *      lists into the inpho_nodes table. ~0.5 MB. Gives slug↔id maps.
- *   2. getSemanticGraph(slug) — resolve the entry's InPhO node, fetch its
+ *   2. getGraph(slug, 'related') — resolve the entry's InPhO node, fetch its
  *      relations once (cached), and build a navigable graph of related ideas +
  *      related thinkers that exist in our corpus.
  */
@@ -203,9 +203,6 @@ export async function getGraph(centerSlug: string, mode: GraphMode = 'related'):
   }
   return buildSemanticGraph(centerSlug, rel.ideas, rel.thinkers);
 }
-
-/** @deprecated use getGraph(slug, 'related') */
-export const getSemanticGraph = (slug: string) => getGraph(slug, 'related');
 
 /**
  * Proactively backfill birth/death years for thinkers associated with the

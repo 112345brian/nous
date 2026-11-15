@@ -68,9 +68,6 @@ export async function importFromSyncFolder(): Promise<'ok' | 'no_folder' | 'not_
   }
 }
 
-// Legacy no-op kept for App.tsx compatibility
-export async function syncOnLaunch(): Promise<void> {}
-
 // ── Zotero ────────────────────────────────────────────────────────────────────
 
 export async function exportToZotero(

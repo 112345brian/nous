@@ -63,17 +63,19 @@ on a device has NOT been measured.
 
 ## Pre-warm mechanics
 
-- `prewarmCommonMath(deps, {maxChunks})` (`src/services/prewarmCommonMath.ts`): dependencies
-  injected (hash, cache lookup, render, write, stamp). Skips cached hashes, renders the rest
-  in chunks of 8 (`renderMathBatch`), writes each chunk (`putMathBatch`) before the next,
-  stamps completion only when nothing is missing or failed, and does nothing at all when the
-  stamp is current. A chunk that renders nothing ends the run.
+- `prewarmCommonMath(deps)` (`src/services/prewarmCommonMath.ts`) is only the list-specific
+  part: when the stamp is current it does nothing; otherwise it calls
+  `ensureMath(list, 'background')` (`src/services/mathCache.ts`) and records the stamp only if
+  that completed. `ensureMath` already hashes (`mathHash`/`normalizeTex`,
+  `src/utils/mathKey.ts`), dedupes, skips stored hashes, renders in chunks and persists each
+  chunk before the next.
+- Priority: `'background'`, the lowest. Each chunk awaits the priority model
+  (`mathThrottlePolicy`), so a reading or download hold, or recent scroll/touch, pauses it at
+  the next chunk boundary. A test guards that the wiring never passes a null (ungated)
+  priority.
 - Stamp: `commonMathStamp()` derives a hash of the list, stored in `meta` key
   `common_math_prewarm`; the pre-warm reruns only when the list changes.
-- `src/services/commonMathWiring.ts` is the single integration point, called once from
-  `App.tsx` after the other idle tasks are queued. On the plain scheduler each chunk is its
-  own task that re-queues the next, so `hold()` / `noteActivity()` gate every chunk.
-- Switching to math-throttle's priority API: schedule one task and pass
-  `beforeChunk: () => idleScheduler.yieldThenMayRun('background')` (see the comment in the
-  wiring file). The plain scheduler does not gate downloads; math-throttle's `hold('download')`
-  does, and `downloadAll` / sync / seed import must take it.
+- `src/services/commonMathWiring.ts` is the single integration point: one idle-scheduler task,
+  scheduled from `App.tsx` after the other idle tasks.
+- List entries are stored already in `normalizeTex` form (tested) and every entry renders
+  through MathJax without `merror` (tested).

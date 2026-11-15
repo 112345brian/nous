@@ -1,9 +1,12 @@
 import * as SQLite from 'expo-sqlite';
 import type { EntryRow, EntrySummary, ReadRow, ReadNode, Session, Annotation } from '../types';
 import { makeExcerpt } from '../utils/excerpt';
+import { mathTierStamp, TIERED_MATH_DEFAULT } from '../utils/mathTier';
 import { CORE_MIGRATIONS } from './coreMigrations';
 import { runMigrations, userVersionStore } from './migrations';
 import { secretsAvailable, getSecret, setSecret, deleteSecret } from './secureSecrets';
+import { mergeAnnotation, newUid } from './annotationMerge';
+import { mergeRead } from './readsMerge';
 
 // One shared connection. getDb() caches the *promise* of an opened-and-migrated
 // database, so concurrent callers share a single open and none can observe a
@@ -12,12 +15,33 @@ import { secretsAvailable, getSecret, setSecret, deleteSecret } from './secureSe
 let _open: Promise<SQLite.SQLiteDatabase> | null = null;
 let _closing: Promise<void> | null = null;
 
+// Tiered math: which math pipeline produced the cached articles. When the
+// effective on/off state or MATH_TIER_VERSION changes, clear cached article
+// content so everything re-fetches and re-processes. Not a versioned migration:
+// it depends on launch-time state (the `tiered_math` meta pref overrides
+// TIERED_MATH_DEFAULT), so it must be able to run again after a flag flip.
+async function applyMathTierStamp(db: SQLite.SQLiteDatabase): Promise<void> {
+  const tierPref = await db.getFirstAsync<{ value: string }>(`SELECT value FROM meta WHERE key = 'tiered_math'`);
+  const tierStamp = mathTierStamp(tierPref ? tierPref.value === '1' : TIERED_MATH_DEFAULT);
+  const tierSeen = await db.getFirstAsync<{ value: string }>(`SELECT value FROM meta WHERE key = 'math_tier_stamp'`);
+  if (tierSeen?.value === tierStamp) return;
+  if (tierSeen) {
+    await db.runAsync(
+      `UPDATE entries SET content_html = NULL, preamble_html = NULL, toc_html = NULL, notes_html = NULL,
+       content_ast = NULL, excerpt = NULL, cached_at = NULL WHERE cached_at IS NOT NULL`
+    );
+    await db.runAsync(`DELETE FROM meta WHERE key IN ('math_pending', 'math_inline_v2', 'math_hash_format_v1')`);
+  }
+  await db.runAsync(`INSERT OR REPLACE INTO meta (key, value) VALUES ('math_tier_stamp', ?)`, [tierStamp]);
+}
+
 async function openAndMigrate(): Promise<SQLite.SQLiteDatabase> {
   const db = await SQLite.openDatabaseAsync('sep.db');
   try {
     // Outside any transaction: SQLite cannot change the journal mode inside one.
     await db.execAsync('PRAGMA journal_mode = WAL;');
     await runMigrations(db, CORE_MIGRATIONS, userVersionStore);
+    await applyMathTierStamp(db);
   } catch (e) {
     await db.closeAsync().catch(() => {});
     throw e;
@@ -357,7 +381,7 @@ export async function recordRead(
       : String(now);
 
   await db.runAsync(
-    `INSERT INTO reads (slug, title, visited_at, from_slug, session_id)
+    `INSERT OR IGNORE INTO reads (slug, title, visited_at, from_slug, session_id)
      VALUES (?, ?, ?, ?, ?)`,
     [slug, title, now, fromSlug ?? null, sessionId]
   );
@@ -777,29 +801,19 @@ export async function getBookmarksFull(): Promise<BookmarkRow[]> {
 // the plain `meta` table, so it never reaches DB backups or the sync export.
 // Where secure storage is unavailable (or a write to it fails) it falls back to
 // a `meta` row — still never exported, because exports use SYNCED_PREF_KEYS.
-// A `meta` row therefore means "newer than, or not yet moved to, secure storage":
-// the next read migrates it. Neither Zotero value is synced between devices.
+// A `meta` row, when present, is the newest value and wins over secure storage;
+// it is removed the next time a save reaches secure storage. Neither Zotero
+// value is synced between devices.
 const ZOTERO_API_KEY = 'zotero_api_key';
 const ZOTERO_USER_ID = 'zotero_user_id';
 
 async function readZoteroApiKey(db: SQLite.SQLiteDatabase): Promise<string> {
-  const legacy = await db.getFirstAsync<{ value: string }>(
+  const fallback = await db.getFirstAsync<{ value: string }>(
     'SELECT value FROM meta WHERE key = ?', [ZOTERO_API_KEY]
   );
-  if (!(await secretsAvailable())) return legacy?.value ?? '';
-  if (!legacy) return (await getSecret(ZOTERO_API_KEY)) ?? '';
-
-  // One-time migration out of `meta`. Only drop the plaintext row once the secure
-  // copy reads back identical; otherwise keep it and retry on the next read.
-  const value = legacy.value;
-  const moved = value === ''
-    ? await deleteSecret(ZOTERO_API_KEY)
-    : (await setSecret(ZOTERO_API_KEY, value)) && (await getSecret(ZOTERO_API_KEY)) === value;
-  if (moved) {
-    await db.runAsync('DELETE FROM meta WHERE key = ?', [ZOTERO_API_KEY]);
-    metaCache.delete(ZOTERO_API_KEY);
-  }
-  return value;
+  if (fallback) return fallback.value;
+  if (!(await secretsAvailable())) return '';
+  return (await getSecret(ZOTERO_API_KEY)) ?? '';
 }
 
 export async function getZoteroPrefs(): Promise<{ apiKey: string; userId: string }> {
@@ -839,13 +853,15 @@ export async function saveAnnotation(
 ): Promise<Annotation> {
   const db = await getDb();
   const now = Date.now();
+  const uid = newUid();
   const result = await db.runAsync(
-    `INSERT INTO annotations (slug, selected_text, context, note, color, content_hash, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [slug, selectedText, context ?? null, note ?? null, color, currentHash ?? null, now, now]
+    `INSERT INTO annotations (uid, slug, selected_text, context, note, color, content_hash, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [uid, slug, selectedText, context ?? null, note ?? null, color, currentHash ?? null, now, now]
   );
   return {
     id: result.lastInsertRowId,
+    uid,
     slug, selected_text: selectedText, context: context ?? null,
     note: note ?? null, color, content_hash: currentHash ?? null,
     created_at: now, updated_at: now,
@@ -933,13 +949,9 @@ export async function exportUserData(): Promise<UserDataExport> {
 export async function importUserData(data: UserDataExport): Promise<void> {
   const db = await getDb();
   await db.withTransactionAsync(async () => {
-    // Reads: insert-or-ignore by (slug, visited_at) to avoid dupes
-    for (const r of data.reads) {
-      await db.runAsync(
-        `INSERT OR IGNORE INTO reads (slug, title, visited_at, from_slug, session_id)
-         VALUES (?, ?, ?, ?, ?)`,
-        [r.slug, r.title, r.visited_at, r.from_slug ?? null, r.session_id]
-      );
+    // Reads: identity is (slug, visited_at, session_id); see readsMerge.ts.
+    for (const r of data.reads ?? []) {
+      await mergeRead(db, r);
     }
     // Bookmarks: upsert by slug, keep newest saved_at
     for (const b of data.bookmarks) {
@@ -953,23 +965,14 @@ export async function importUserData(data: UserDataExport): Promise<void> {
         [b.slug, b.title, b.saved_at, b.notes ?? null]
       );
     }
-    // Annotations: upsert by id — incoming id wins on conflict
-    for (const a of data.annotations) {
-      await db.runAsync(
-        `INSERT INTO annotations (id, slug, selected_text, context, note, color, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           note = COALESCE(excluded.note, note),
-           color = excluded.color,
-           updated_at = MAX(updated_at, excluded.updated_at)`,
-        [a.id, a.slug, a.selected_text, a.context ?? null,
-         a.note ?? null, a.color, a.created_at, a.updated_at]
-      );
+    // Annotations: matched across devices by uid (never by the local integer id),
+    // last writer wins per record — see annotationMerge.ts.
+    for (const a of data.annotations ?? []) {
+      await mergeAnnotation(db, a);
     }
-    // Prefs: merge, remote wins — allowlisted keys only. Older exports contain the
-    // whole `meta` table (Zotero credentials, sync folder, caches, migration
-    // markers); those are ignored rather than written back.
-    for (const [key, value] of Object.entries(data.prefs ?? {})) {
+    // Prefs: merge, remote wins — allowlisted keys only, so a file can never
+    // write credentials, device paths or caches into this device's meta.
+    for (const [key, value] of Object.entries(data.prefs)) {
       if (!SYNCED_PREF_KEYS.includes(key) || typeof value !== 'string') continue;
       await db.runAsync(
         'INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [key, value]

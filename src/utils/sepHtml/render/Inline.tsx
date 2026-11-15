@@ -2,10 +2,7 @@ import React from 'react';
 import { Text, View } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 import type { Inline } from '../types';
-import { SEP_BASE_FONT, SEP_COLORS, sepText } from './theme';
-
-// MathJax sizes SVGs with ex:8 against em:16; reader runs at SEP_BASE_FONT px.
-const PX_PER_EX = SEP_BASE_FONT / 2;
+import { SEP_COLORS, useSepTheme, type SepTheme } from './theme';
 
 export interface InlineHandlers {
   onLinkPress?: (href: string, wl: boolean) => void;
@@ -23,8 +20,28 @@ export interface Highlight {
   onPress?: () => void;
 }
 
-const linkStyle = { color: SEP_COLORS.accent, textDecorationLine: 'underline' as const };
-const fnStyle = { color: SEP_COLORS.accent, fontSize: sepText.body.fontSize! * 0.85 };
+// Size-dependent run styles, derived from the theme once per reader font size.
+function makeRunStyles(t: SepTheme) {
+  return {
+    link: { color: SEP_COLORS.accent, textDecorationLine: 'underline' as const },
+    strong: { fontWeight: '700' as const, color: SEP_COLORS.textBright },
+    fn: { color: SEP_COLORS.accent, fontSize: t.inline.footnote },
+    code: {
+      fontFamily: 'monospace' as const,
+      fontSize: t.inline.code,
+      color: SEP_COLORS.textBright,
+      backgroundColor: SEP_COLORS.bgRaised,
+    },
+    script: { fontSize: t.inline.script },
+    small: { fontSize: t.inline.small },
+  };
+}
+const runStyleCache = new WeakMap<SepTheme, ReturnType<typeof makeRunStyles>>();
+function runStyles(t: SepTheme) {
+  let r = runStyleCache.get(t);
+  if (!r) { r = makeRunStyles(t); runStyleCache.set(t, r); }
+  return r;
+}
 
 // Footnote marker. The glyph stays small and unobtrusive, but RN cannot
 // put hitSlop/padding on inline text, so we widen the touch target by
@@ -36,31 +53,23 @@ const FN_PAD_TRAIL = '\u2002'; // one en-space — widens the tap zone where a w
 function renderFootnote(
   node: Extract<Inline, { t: 'fnref' }>,
   h: InlineHandlers,
+  t: SepTheme,
   key: string,
   extra?: object,
 ) {
   return (
     <Text
       key={key}
-      style={extra ? { ...extra, ...fnStyle } : fnStyle}
+      style={extra ? { ...extra, ...runStyles(t).fn } : runStyles(t).fn}
       onPress={() => h.onFootnotePress?.(node.href, node.label)}
     >
       {FN_PAD_LEAD}{node.label}{FN_PAD_TRAIL}
     </Text>
   );
 }
-// Inline code chip — mirrors readerCss `code { background; border-radius; … }`.
-// RN can't pad inline text, so hair-spaces fake the horizontal breathing room.
-const codeStyle = {
-  fontFamily: 'monospace' as const,
-  fontSize: sepText.body.fontSize! * 0.9,
-  color: SEP_COLORS.textBright,
-  backgroundColor: SEP_COLORS.bgRaised,
-};
-const strongStyle = { fontWeight: '700' as const, color: SEP_COLORS.textBright };
+// Inline code chip (runStyles().code). RN can't pad inline text, so spaces
+// around the text fake the horizontal breathing room.
 const emStyle = { fontStyle: 'italic' as const };
-const scriptStyle = { fontSize: sepText.body.fontSize! * 0.75 };
-const smallStyle = { fontSize: sepText.body.fontSize! * 0.85 };
 const underlineStyle = { textDecorationLine: 'underline' as const };
 const strikeStyle = { textDecorationLine: 'line-through' as const };
 
@@ -72,9 +81,9 @@ export function hasMath(inlines: Inline[]): boolean {
   return false;
 }
 
-function renderMathNode(node: { t: 'mathsvg' | 'mathref'; w: number; h: number; display: boolean; svg?: string; hash?: string }, h: InlineHandlers, k: string, inline = false) {
-  const pw = Math.max(1, Math.round(node.w * PX_PER_EX));
-  const ph = Math.max(1, Math.round(node.h * PX_PER_EX));
+function renderMathNode(node: { t: 'mathsvg' | 'mathref'; w: number; h: number; display: boolean; svg?: string; hash?: string }, h: InlineHandlers, t: SepTheme, k: string, inline = false) {
+  const pw = Math.max(1, Math.round(node.w * t.pxPerEx));
+  const ph = Math.max(1, Math.round(node.h * t.pxPerEx));
   const svg = node.t === 'mathsvg' ? node.svg! : (node.hash ? h.mathSvgs?.[node.hash] : undefined);
   if (!svg) {
     // Placeholder: reserve the right dimensions while SVGs load.
@@ -85,7 +94,8 @@ function renderMathNode(node: { t: 'mathsvg' | 'mathref'; w: number; h: number; 
 }
 
 // ── Fast path: pure text/links/emphasis nest cleanly inside one <Text> ────────
-function renderTextRuns(inlines: Inline[], h: InlineHandlers, key = 'i'): React.ReactNode[] {
+function renderTextRuns(inlines: Inline[], h: InlineHandlers, t: SepTheme, key = 'i'): React.ReactNode[] {
+  const rs = runStyles(t);
   return inlines.map((node, idx) => {
     const k = `${key}-${idx}`;
     switch (node.t) {
@@ -93,37 +103,37 @@ function renderTextRuns(inlines: Inline[], h: InlineHandlers, key = 'i'): React.
         return <Text key={k}>{node.v}</Text>;
       case 'em':
         return (
-          <Text key={k} style={node.kind === 'strong' ? strongStyle : emStyle}>
-            {renderTextRuns(node.children, h, k)}
+          <Text key={k} style={node.kind === 'strong' ? rs.strong : emStyle}>
+            {renderTextRuns(node.children, h, t, k)}
           </Text>
         );
       case 'styled': {
         const s = node.style === 'underline' ? underlineStyle
           : node.style === 'strike' ? strikeStyle
-          : node.style === 'small' ? smallStyle
+          : node.style === 'small' ? rs.small
           : {}; // quote handled via wrapping chars below
         if (node.style === 'quote') {
-          return <Text key={k}>{'”'}{renderTextRuns(node.children, h, k)}{'”'}</Text>;
+          return <Text key={k}>{'”'}{renderTextRuns(node.children, h, t, k)}{'”'}</Text>;
         }
-        return <Text key={k} style={s}>{renderTextRuns(node.children, h, k)}</Text>;
+        return <Text key={k} style={s}>{renderTextRuns(node.children, h, t, k)}</Text>;
       }
       case 'link':
         return (
-          <Text key={k} style={linkStyle} onPress={() => h.onLinkPress?.(node.href, node.wl)}>
-            {renderTextRuns(node.children, h, k)}
+          <Text key={k} style={rs.link} onPress={() => h.onLinkPress?.(node.href, node.wl)}>
+            {renderTextRuns(node.children, h, t, k)}
           </Text>
         );
       case 'fnref':
-        return renderFootnote(node, h, k);
+        return renderFootnote(node, h, t, k);
       case 'sup':
-        return <Text key={k} style={scriptStyle}>{renderTextRuns(node.children, h, k)}</Text>;
+        return <Text key={k} style={rs.script}>{renderTextRuns(node.children, h, t, k)}</Text>;
       case 'sub':
-        return <Text key={k} style={scriptStyle}>{renderTextRuns(node.children, h, k)}</Text>;
+        return <Text key={k} style={rs.script}>{renderTextRuns(node.children, h, t, k)}</Text>;
       case 'code':
-        return <Text key={k} style={codeStyle}>{` ${node.v} `}</Text>;
+        return <Text key={k} style={rs.code}>{` ${node.v} `}</Text>;
       case 'mathsvg':
       case 'mathref':
-        return renderMathNode(node, h, k, true);
+        return renderMathNode(node, h, t, k, true);
       default:
         return null;
     }
@@ -165,8 +175,9 @@ function wrapTextWithHighlights(
 }
 
 function renderHighlightedRuns(
-  inlines: Inline[], h: InlineHandlers, hls: Highlight[], ctx: { offset: number }, key = 'i',
+  inlines: Inline[], h: InlineHandlers, t: SepTheme, hls: Highlight[], ctx: { offset: number }, key = 'i',
 ): React.ReactNode[] {
+  const rs = runStyles(t);
   return inlines.map((node, idx) => {
     const k = `${key}-${idx}`;
     switch (node.t) {
@@ -177,36 +188,36 @@ function renderHighlightedRuns(
       }
       case 'em':
         return (
-          <Text key={k} style={node.kind === 'strong' ? strongStyle : emStyle}>
-            {renderHighlightedRuns(node.children, h, hls, ctx, k)}
+          <Text key={k} style={node.kind === 'strong' ? rs.strong : emStyle}>
+            {renderHighlightedRuns(node.children, h, t, hls, ctx, k)}
           </Text>
         );
       case 'styled': {
         if (node.style === 'quote') {
-          return <Text key={k}>{'”'}{renderHighlightedRuns(node.children, h, hls, ctx, k)}{'”'}</Text>;
+          return <Text key={k}>{'”'}{renderHighlightedRuns(node.children, h, t, hls, ctx, k)}{'”'}</Text>;
         }
         const s = node.style === 'underline' ? underlineStyle
           : node.style === 'strike' ? strikeStyle
-          : node.style === 'small' ? smallStyle
+          : node.style === 'small' ? rs.small
           : {};
-        return <Text key={k} style={s}>{renderHighlightedRuns(node.children, h, hls, ctx, k)}</Text>;
+        return <Text key={k} style={s}>{renderHighlightedRuns(node.children, h, t, hls, ctx, k)}</Text>;
       }
       case 'link':
         return (
-          <Text key={k} style={linkStyle} onPress={() => h.onLinkPress?.(node.href, node.wl)}>
-            {renderHighlightedRuns(node.children, h, hls, ctx, k)}
+          <Text key={k} style={rs.link} onPress={() => h.onLinkPress?.(node.href, node.wl)}>
+            {renderHighlightedRuns(node.children, h, t, hls, ctx, k)}
           </Text>
         );
       case 'sup':
-        return <Text key={k} style={scriptStyle}>{renderHighlightedRuns(node.children, h, hls, ctx, k)}</Text>;
+        return <Text key={k} style={rs.script}>{renderHighlightedRuns(node.children, h, t, hls, ctx, k)}</Text>;
       case 'sub':
-        return <Text key={k} style={scriptStyle}>{renderHighlightedRuns(node.children, h, hls, ctx, k)}</Text>;
+        return <Text key={k} style={rs.script}>{renderHighlightedRuns(node.children, h, t, hls, ctx, k)}</Text>;
       case 'code': {
         ctx.offset += node.v.length;
-        return <Text key={k} style={codeStyle}>{` ${node.v} `}</Text>;
+        return <Text key={k} style={rs.code}>{` ${node.v} `}</Text>;
       }
       case 'fnref':
-        return renderFootnote(node, h, k);
+        return renderFootnote(node, h, t, k);
       default:
         return null;
     }
@@ -216,11 +227,12 @@ function renderHighlightedRuns(
 // ── Math path: word-level tokens in a flex-wrap row so SVG can sit between text.
 // Only used for paragraphs that actually contain inline math (~24% of corpus),
 // so the common case keeps the fast single-<Text> path.
-function flattenToTokens(inlines: Inline[], h: InlineHandlers, style: object, out: React.ReactNode[], keyRef: { n: number }) {
+function flattenToTokens(inlines: Inline[], h: InlineHandlers, t: SepTheme, style: object, out: React.ReactNode[], keyRef: { n: number }) {
+  const rs = runStyles(t);
   for (const node of inlines) {
     if (node.t === 'mathsvg' || node.t === 'mathref') {
       if (node.display) continue; // display math handled at block level
-      out.push(renderMathNode(node, h, `m${keyRef.n++}`, true));
+      out.push(renderMathNode(node, h, t, `m${keyRef.n++}`, true));
     } else if (node.t === 'text') {
       // split into words; spaces become natural wrap points
       for (const word of node.v.split(/(\s+)/)) {
@@ -228,41 +240,41 @@ function flattenToTokens(inlines: Inline[], h: InlineHandlers, style: object, ou
         out.push(<Text key={`w${keyRef.n++}`} style={style}>{word}</Text>);
       }
     } else if (node.t === 'link') {
-      const ls = { ...style, ...linkStyle };
+      const ls = { ...style, ...rs.link };
       const k = `l${keyRef.n++}`;
       // Render as a single tappable <Text> so onPress is attached. Math inside
       // links is rare; renderTextRuns' safety-net path (raw TeX text) handles it.
       out.push(
         <Text key={k} style={ls} onPress={() => h.onLinkPress?.(node.href, node.wl)}>
-          {renderTextRuns(node.children, h, k)}
+          {renderTextRuns(node.children, h, t, k)}
         </Text>
       );
     } else if (node.t === 'em') {
       const ns = { ...style, ...(node.kind === 'strong'
         ? { fontWeight: '700' as const, color: SEP_COLORS.textBright }
         : { fontStyle: 'italic' as const }) };
-      flattenToTokens(node.children, h, ns, out, keyRef);
+      flattenToTokens(node.children, h, t, ns, out, keyRef);
     } else if (node.t === 'styled') {
       if (node.style === 'quote') {
         out.push(<Text key={`q${keyRef.n++}`} style={style}>{'"'}</Text>);
-        flattenToTokens(node.children, h, style, out, keyRef);
+        flattenToTokens(node.children, h, t, style, out, keyRef);
         out.push(<Text key={`q${keyRef.n++}`} style={style}>{'"'}</Text>);
       } else {
         const ns = node.style === 'underline' ? { ...style, textDecorationLine: 'underline' as const }
           : node.style === 'strike' ? { ...style, textDecorationLine: 'line-through' as const }
           : { ...style, fontSize: (style as any).fontSize! * 0.85 }; // small
-        flattenToTokens(node.children, h, ns, out, keyRef);
+        flattenToTokens(node.children, h, t, ns, out, keyRef);
       }
     } else if (node.t === 'sup') {
       const ns = { ...style, fontSize: (style as any).fontSize! * 0.75 };
-      flattenToTokens(node.children, h, ns, out, keyRef);
+      flattenToTokens(node.children, h, t, ns, out, keyRef);
     } else if (node.t === 'sub') {
       const ns = { ...style, fontSize: (style as any).fontSize! * 0.75 };
-      flattenToTokens(node.children, h, ns, out, keyRef);
+      flattenToTokens(node.children, h, t, ns, out, keyRef);
     } else if (node.t === 'fnref') {
-      out.push(renderFootnote(node, h, `f${keyRef.n++}`, style));
+      out.push(renderFootnote(node, h, t, `f${keyRef.n++}`, style));
     } else if (node.t === 'code') {
-      out.push(<Text key={`c${keyRef.n++}`} style={{ ...style, ...codeStyle }}>{` ${node.v} `}</Text>);
+      out.push(<Text key={`c${keyRef.n++}`} style={{ ...style, ...rs.code }}>{` ${node.v} `}</Text>);
     }
   }
 }
@@ -279,16 +291,17 @@ interface Props {
 }
 
 export function InlineContent({ inlines, handlers, baseStyle, highlights, precomputedHasMath }: Props) {
-  const style = baseStyle ? { ...sepText.body, ...baseStyle } : sepText.body;
+  const t = useSepTheme();
+  const style = baseStyle ? { ...t.text.body, ...baseStyle } : t.text.body;
   const withMath = precomputedHasMath ?? hasMath(inlines);
   if (!withMath) {
     const runs = highlights && highlights.length
-      ? renderHighlightedRuns(inlines, handlers, highlights, { offset: 0 })
-      : renderTextRuns(inlines, handlers);
+      ? renderHighlightedRuns(inlines, handlers, t, highlights, { offset: 0 })
+      : renderTextRuns(inlines, handlers, t);
     return <Text style={style}>{runs}</Text>;
   }
   const tokens: React.ReactNode[] = [];
-  flattenToTokens(inlines, handlers, style, tokens, { n: 0 });
+  flattenToTokens(inlines, handlers, t, style, tokens, { n: 0 });
   return (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' }}>
       {tokens}

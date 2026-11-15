@@ -13,6 +13,21 @@ export function tryReanchor(
   context: string | null,
   newContent: string
 ): string | null {
+  const direct = tryReanchorIn(selectedText, context, newContent);
+  if (direct !== null) return direct;
+  // The stored selection is rendered text; the article is HTML. A selection that
+  // crosses inline markup (<em>, links, tiered math like <em>x</em>₁) can only
+  // match once tags are stripped.
+  const plain = newContent.replace(/<[^>]*>/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+  return plain === newContent ? null : tryReanchorIn(selectedText, context, plain);
+}
+
+function tryReanchorIn(
+  selectedText: string,
+  context: string | null,
+  newContent: string
+): string | null {
   // 1. Exact match (shouldn't reach here if already found, but be safe)
   if (newContent.includes(selectedText)) return selectedText;
 

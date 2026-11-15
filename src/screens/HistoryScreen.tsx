@@ -9,6 +9,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { getSessions } from '../services/db';
 import type { Session, ReadNode } from '../types';
 import type { RootStackParamList } from '../../App';
+import { colors, themedStyles } from '../theme/tokens';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -27,7 +28,7 @@ export default function HistoryScreen() {
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top }]}>
-        <TouchableOpacity
+        <TouchableOpacity accessibilityRole="button"
           style={styles.back}
           onPress={() => nav.goBack()}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
@@ -73,7 +74,7 @@ function SessionBlock({
 
   return (
     <View style={styles.session}>
-      <TouchableOpacity
+      <TouchableOpacity accessibilityRole="button"
         style={styles.sessionHeader}
         onPress={() => setCollapsed(c => !c)}
         activeOpacity={0.7}
@@ -118,7 +119,7 @@ function TreeNode({
         {/* Vertical line continuing down for children */}
         {hasChildren && <View style={styles.connectorV} />}
 
-        <TouchableOpacity
+        <TouchableOpacity accessibilityRole="button"
           style={styles.nodePill}
           onPress={() => onOpen(node.slug, node.title)}
           activeOpacity={0.6}
@@ -183,8 +184,8 @@ function formatRelative(ts: number): string {
 
 // ── Styles ───────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#121212' },
+const styles = themedStyles(() => themedStyles(() => StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
 
   header: {
     flexDirection: 'row',
@@ -192,22 +193,22 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     paddingHorizontal: 4,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#2a2a2a',
+    borderBottomColor: colors.border,
     minHeight: 44,
   },
   back: { flexDirection: 'row', alignItems: 'center', minWidth: 80, paddingHorizontal: 8 },
-  backChevron: { color: '#7ba4ff', fontSize: 28, lineHeight: 28, marginRight: 1 },
-  backLabel: { color: '#7ba4ff', fontSize: 16 },
-  headerTitle: { flex: 1, color: '#e8e8e8', fontSize: 15, fontWeight: '600', textAlign: 'center' },
+  backChevron: { color: colors.accentSoft, fontSize: 28, lineHeight: 28, marginRight: 1 },
+  backLabel: { color: colors.accentSoft, fontSize: 16 },
+  headerTitle: { flex: 1, color: colors.text, fontSize: 15, fontWeight: '600', textAlign: 'center' },
 
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 },
-  emptyText: { color: '#444', fontSize: 15, lineHeight: 22, textAlign: 'center' },
+  emptyText: { color: colors.textMuted, fontSize: 15, lineHeight: 22, textAlign: 'center' },
 
   session: {
     marginTop: 24,
     marginHorizontal: 16,
     borderLeftWidth: 1,
-    borderLeftColor: '#222',
+    borderLeftColor: colors.borderSubtle,
     paddingLeft: 12,
   },
   sessionHeader: {
@@ -218,13 +219,13 @@ const styles = StyleSheet.create({
   },
   sessionDot: {
     width: 8, height: 8, borderRadius: 4,
-    backgroundColor: '#7ba4ff',
+    backgroundColor: colors.accentSoft,
     marginLeft: -16,
   },
   sessionMeta: { flex: 1 },
-  sessionDate: { color: '#c0c0c0', fontSize: 13, fontWeight: '600' },
-  sessionStats: { color: '#555', fontSize: 11, marginTop: 1 },
-  chevron: { color: '#444', fontSize: 16 },
+  sessionDate: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
+  sessionStats: { color: colors.textMuted, fontSize: 11, marginTop: 1 },
+  chevron: { color: colors.textMuted, fontSize: 16 },
 
   tree: { paddingBottom: 4 },
 
@@ -236,7 +237,7 @@ const styles = StyleSheet.create({
     top: 14,
     width: 14,
     height: 1,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: colors.elevated,
   },
   connectorV: {
     position: 'absolute',
@@ -244,17 +245,17 @@ const styles = StyleSheet.create({
     top: 28,
     bottom: -6,
     width: 1,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: colors.elevated,
   },
   nodePill: {
     flex: 1,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: colors.surface,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#2a2a2a',
+    borderColor: colors.border,
   },
-  nodeTitle: { color: '#d6d6d6', fontSize: 14, lineHeight: 19 },
-  nodeTime: { color: '#444', fontSize: 11, marginTop: 3 },
-});
+  nodeTitle: { color: colors.textSecondary, fontSize: 14, lineHeight: 19 },
+  nodeTime: { color: colors.textMuted, fontSize: 11, marginTop: 3 },
+})));

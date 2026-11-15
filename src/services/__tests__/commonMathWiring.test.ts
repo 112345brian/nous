@@ -1,54 +1,33 @@
-jest.mock('../db', () => ({ getMeta: jest.fn(), setMeta: jest.fn(), getMathSvgMap: jest.fn(), putMathBatch: jest.fn() }));
-jest.mock('../catalog', () => ({ mathHash: (t: string, d: boolean) => `${d ? 'D' : 'I'}:${t}` }));
-jest.mock('../mathRender', () => ({ renderMathBatch: jest.fn() }));
+export {};
+declare const __dirname: string;
+const fs = require('fs');
+const path = require('path');
+
+const mockEnsure = jest.fn();
+jest.mock('../db', () => ({ getMeta: jest.fn(), setMeta: jest.fn() }));
+jest.mock('../mathCache', () => ({ ensureMath: (...a: unknown[]) => mockEnsure(...a) }));
 jest.mock('../idleScheduler', () => ({ idleScheduler: { schedule: jest.fn() } }));
 
-import { scheduleCommonMathPrewarm } from '../commonMathWiring';
-import type { PrewarmDeps } from '../prewarmCommonMath';
+import { scheduleCommonMathPrewarm, realPrewarmDeps } from '../commonMathWiring';
 
-const LIST = [1, 2, 3, 4, 5].map(i => ({ tex: `x_${i}`, display: false }));
-
-function harness(failAll = false) {
-  const cached = new Set<string>();
-  let stamp: string | null = null;
-  const deps: PrewarmDeps = {
-    list: LIST, stamp: 's1', chunkSize: 2,
-    hash: (t, d) => `${d ? 'D' : 'I'}:${t}`,
-    getCachedSvgMap: async hs => Object.fromEntries(hs.filter(h => cached.has(h)).map(h => [h, 'x'])),
-    render: async items => items.map(i => (failAll ? { ...i, error: 'timeout' } : { ...i, b64: 'AA==', w: 1, h: 1 })),
-    putBatch: async rows => rows.forEach(r => cached.add(r.hash)),
-    getStamp: async () => stamp,
-    setStamp: async s => { stamp = s; },
-    decode: () => '<svg/>',
-  };
-  const queue: Array<[string, () => unknown]> = [];
-  const scheduler = { schedule: (k: string, fn: () => unknown) => { queue.push([k, fn]); return true; } };
-  const drain = async () => { let n = 0; while (queue.length && n++ < 20) { const [, fn] = queue.shift()!; await fn(); } return n; };
-  return { deps, scheduler, queue, drain, getStamp: () => stamp, cached };
-}
-
-describe('scheduleCommonMathPrewarm', () => {
-  it('schedules exactly one task up front, then one task per chunk', async () => {
-    const h = harness();
-    scheduleCommonMathPrewarm(h.scheduler, h.deps);
-    expect(h.queue.map(q => q[0])).toEqual(['prewarm-common-math']);
-    const runs = await h.drain();
-    expect(runs).toBe(3); // 5 equations, chunks of 2
-    expect(h.getStamp()).toBe('s1');
+describe('commonMathWiring', () => {
+  it('schedules exactly one idle task under a stable key', () => {
+    const schedule = jest.fn(() => true);
+    scheduleCommonMathPrewarm({ schedule }, realPrewarmDeps());
+    expect(schedule).toHaveBeenCalledTimes(1);
+    expect((schedule.mock.calls[0] as unknown[])[0]).toBe('prewarm-common-math');
   });
 
-  it('does not reschedule after a relaunch with the stamp current', async () => {
-    const h = harness();
-    scheduleCommonMathPrewarm(h.scheduler, h.deps);
-    await h.drain();
-    scheduleCommonMathPrewarm(h.scheduler, h.deps);
-    expect(await h.drain()).toBe(1);
+  it("renders at the lowest ('background') priority, never ungated", async () => {
+    mockEnsure.mockResolvedValue({ complete: true });
+    await realPrewarmDeps().ensure([{ tex: 'x^2', display: false }]);
+    expect(mockEnsure).toHaveBeenCalledWith([{ tex: 'x^2', display: false }], 'background');
   });
 
-  it('stops (no endless rescheduling) when rendering fails', async () => {
-    const h = harness(true);
-    scheduleCommonMathPrewarm(h.scheduler, h.deps);
-    expect(await h.drain()).toBe(1);
-    expect(h.getStamp()).toBeNull();
+  it('source guard: only ensureMath(..., "background") is used for the pre-warm', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'commonMathWiring.ts'), 'utf8').replace(/\/\/.*$/gm, '');
+    expect(src.match(/ensureMath\(/g)?.length).toBe(1);
+    expect(src).toMatch(/ensureMath\(spots, 'background'\)/);
+    expect(src).not.toMatch(/renderMathBatch|renderMathChunked/);
   });
 });

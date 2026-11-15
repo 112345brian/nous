@@ -6,6 +6,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { runTests, getTestList } from '../tests/runTests';
 import type { TestResult, TestReport } from '../tests/runTests';
+import { colors, themedStyles } from '../theme/tokens';
 
 type Phase = 'idle' | 'running' | 'done';
 
@@ -82,7 +83,7 @@ export default function TestRunnerScreen() {
                 <View key={r.name} style={styles.row}>
                   <View style={styles.rowLeft}>
                     {r.status === 'pending' && <View style={[styles.dot, styles.dotPending]} />}
-                    {r.status === 'running' && <ActivityIndicator size="small" color="#7ba4ff" style={styles.spinner} />}
+                    {r.status === 'running' && <ActivityIndicator size="small" color={colors.accentSoft} style={styles.spinner} />}
                     {r.status === 'pass'    && <Text style={styles.iconPass}>✓</Text>}
                     {r.status === 'fail'    && <Text style={styles.iconFail}>✗</Text>}
                   </View>
@@ -124,7 +125,7 @@ export default function TestRunnerScreen() {
       {/* Re-run button */}
       {phase === 'done' && (
         <View style={[styles.footer, { paddingBottom: insets.bottom + 8 }]}>
-          <TouchableOpacity style={styles.rerunBtn} onPress={start}>
+          <TouchableOpacity accessibilityRole="button" style={styles.rerunBtn} onPress={start}>
             <Text style={styles.rerunLabel}>Run Again</Text>
           </TouchableOpacity>
         </View>
@@ -144,23 +145,23 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0d0d0d' },
+const styles = themedStyles(() => StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
 
   header: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 10 },
-  title: { color: '#7ba4ff', fontSize: 18, fontWeight: '500', letterSpacing: 2 },
-  subtitle: { color: '#555', fontSize: 13, marginTop: 4 },
+  title: { color: colors.accentSoft, fontSize: 18, fontWeight: '500', letterSpacing: 2 },
+  subtitle: { color: colors.textMuted, fontSize: 13, marginTop: 4 },
 
-  progressTrack: { height: 2, backgroundColor: '#1a1a1a', marginHorizontal: 0 },
-  progressFill: { height: '100%', backgroundColor: '#3a5a8a', borderRadius: 1 },
+  progressTrack: { height: 2, backgroundColor: colors.surface, marginHorizontal: 0 },
+  progressFill: { height: '100%', backgroundColor: colors.accentWash, borderRadius: 1 },
   progressPass: { backgroundColor: '#34d399' },
-  progressFail: { backgroundColor: '#f87171' },
+  progressFail: { backgroundColor: colors.danger },
 
   scroll: { flex: 1 },
 
   group: { marginTop: 24, marginHorizontal: 16 },
   groupLabel: {
-    color: '#333', fontSize: 10, fontWeight: '700', letterSpacing: 1,
+    color: colors.textMuted, fontSize: 11, fontWeight: '700', letterSpacing: 1,
     textTransform: 'uppercase', marginBottom: 8,
   },
 
@@ -169,57 +170,57 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     paddingVertical: 7,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#1a1a1a',
+    borderBottomColor: colors.borderSubtle,
     gap: 10,
   },
   rowLeft: { width: 22, alignItems: 'center', paddingTop: 1 },
   rowBody: { flex: 1 },
 
   dot: { width: 8, height: 8, borderRadius: 4 },
-  dotPending: { backgroundColor: '#2a2a2a' },
+  dotPending: { backgroundColor: colors.elevated },
   spinner: { transform: [{ scale: 0.7 }] },
 
   iconPass: { color: '#34d399', fontSize: 14, fontWeight: '700' },
-  iconFail: { color: '#f87171', fontSize: 14, fontWeight: '700' },
+  iconFail: { color: colors.danger, fontSize: 14, fontWeight: '700' },
 
-  testName: { color: '#555', fontSize: 14 },
-  testNamePass: { color: '#c8c8c8' },
-  testNameFail: { color: '#f87171' },
+  testName: { color: colors.textMuted, fontSize: 14 },
+  testNamePass: { color: colors.textSecondary },
+  testNameFail: { color: colors.danger },
   errorMsg: {
-    color: '#f87171', fontSize: 11, marginTop: 3, lineHeight: 16,
+    color: colors.danger, fontSize: 11, marginTop: 3, lineHeight: 16,
     fontFamily: 'monospace',
   },
-  duration: { color: '#2a2a2a', fontSize: 11, marginTop: 2 },
+  duration: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
 
   snapshot: {
     margin: 16, marginTop: 32,
-    backgroundColor: '#111', borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: '#2a2a2a',
+    backgroundColor: colors.bg, borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border,
     padding: 14,
   },
   snapshotTitle: {
-    color: '#444', fontSize: 10, fontWeight: '700', letterSpacing: 1,
+    color: colors.textMuted, fontSize: 11, fontWeight: '700', letterSpacing: 1,
     textTransform: 'uppercase', marginBottom: 10,
   },
   snapshotRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
     paddingVertical: 5,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#1a1a1a',
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.borderSubtle,
     gap: 12,
   },
-  snapshotLabel: { color: '#444', fontSize: 12, flex: 0.4 },
-  snapshotValue: { color: '#666', fontSize: 11, flex: 0.6, textAlign: 'right' },
-  snapshotMono: { fontFamily: 'monospace', fontSize: 10, color: '#3a5a3a' },
+  snapshotLabel: { color: colors.textMuted, fontSize: 12, flex: 0.4 },
+  snapshotValue: { color: colors.textMuted, fontSize: 11, flex: 0.6, textAlign: 'right' },
+  snapshotMono: { fontFamily: 'monospace', fontSize: 11, color: colors.textMuted },
 
   footer: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: '#0d0d0d',
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#1a1a1a',
+    backgroundColor: colors.bg,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.borderSubtle,
     padding: 16,
   },
   rerunBtn: {
-    backgroundColor: '#1e2a4a', borderRadius: 10, paddingVertical: 12,
+    backgroundColor: colors.accentWash, borderRadius: 10, paddingVertical: 12,
     alignItems: 'center',
   },
-  rerunLabel: { color: '#7ba4ff', fontSize: 15, fontWeight: '600' },
-});
+  rerunLabel: { color: colors.accentSoft, fontSize: 15, fontWeight: '600' },
+}));
