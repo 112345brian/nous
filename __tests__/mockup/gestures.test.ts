@@ -19,8 +19,9 @@ describe('GESTURE — navigation gestures', () => {
     expect(art()).toMatch(/openGraph|navigate\('Graph'/);
   });
 
-  test('GESTURE-03 swipe right → home', () => {
-    expect(art()).toMatch(/swipeHome/);
+  test('GESTURE-03 left-edge swipe right → back (Android only; iOS/macOS use the system gesture)', () => {
+    expect(art()).toMatch(/edgeBack/);
+    expect(art()).toMatch(/\.enabled\(Platform\.OS === 'android'\)/);
     expect(art()).toMatch(/nav\.goBack\(\)/);
   });
 

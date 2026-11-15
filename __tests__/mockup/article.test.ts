@@ -33,12 +33,13 @@ describe('ART — article screen', () => {
     expect(art()).toMatch(/annChip:\s*\{[^}]*rgba\(91,142,245,0?\.14\)/);
   });
 
-  test('ART-09 prose 16px base, sans-serif, line-height 1.78, color #d0d0d0', () => {
+  test('ART-09 prose 17px default base (user-adjustable), sans-serif, line-height 1.8, color #d0d0d0', () => {
     const css = SRC.readerCss();
-    expect(css).toMatch(/--font-size:\s*16px/);          // mockup base size
-    expect(css).toMatch(/font-family:\s*var\(--sans\)/); // mockup sans body
-    expect(css).toMatch(/line-height:\s*1\.78/);
-    expect(css).toMatch(/--text:\s*#d0d0d0/i);
+    expect(css).toMatch(/--font-size:\s*17px/);          // default; ArticleScreen overrides from the font-size setting
+    expect(css).toMatch(/font-size:\s*var\(--font-size\)/);
+    expect(css).toMatch(/font-family:\s*var\(--sans\)/); // sans body
+    expect(css).toMatch(/line-height:\s*1\.8\b/);
+    expect(css).toMatch(/--text:\s*#d0d0d0/i);          // dark-scheme text role
   });
 
   test('ART-14 wiki link styling in reader CSS', () =>

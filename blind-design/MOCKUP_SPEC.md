@@ -39,10 +39,13 @@ Status legend used in the audit:
 
 ---
 
-## NAV — Bottom navigation (mockup `.bn`)
+## NAV — Bottom navigation (REMOVED)
 
-| ID | Decision |
-|----|----------|
+The mockup's bottom nav (NAV-01…06: Home/Search/Notes bar, 56px, pill, 10px labels)
+was removed in v1.2.1. Home now has inline **Reading / Notes / Browse** tabs with an
+underline on the active one (tests HOME-TABS-01/02); search is the pill/overlay on Home.
+
+----|----------|
 | NAV-01 | Bottom nav height `56px`, top border `#2e2e2e`, bg `#111` |
 | NAV-02 | Three items: **Home**, **Search**, **Notes** (in that order) |
 | NAV-03 | Active item uses accent color; inactive uses text-hint `#555` |
@@ -63,7 +66,7 @@ Status legend used in the audit:
 | HOME-05 | Search pill: magnifier icon `18px` hint color + placeholder text `14px` hint |
 | HOME-06 | Search pill placeholder text = "Search pages…" |
 | HOME-07 | Section label: `11px`/`600`, letter-spacing `.07em`, uppercase, hint color, padding `14/16/6` |
-| HOME-08 | Section "Continue reading" exists |
+| HOME-08 | Reading tab shows **Bookmarks** and **Recent** sections (replaced the mockup's "Continue reading") |
 | HOME-09 | Page row: flex, gap `14`, padding `13/16`, bottom border `border-subtle` |
 | HOME-10 | Page-row icon: `38×38`, radius `8`, bg-surface, document glyph `17px` |
 | HOME-11 | Page-row title: `14px`/`500`, text color |
@@ -87,7 +90,7 @@ Status legend used in the audit:
 | ART-06 | Title: `26px`/`700`, line-height `1.2`, letter-spacing `-.02em`, text color |
 | ART-07 | Meta row `12px` hint: updated/age · read-minutes |
 | ART-08 | Annotation-count chip: accent-dim bg, accent-border, `11px`/`500` accent, message icon, "N notes" |
-| ART-09 | Prose: padding `18`, font `16px`, line-height `1.78`, color `#d0d0d0` |
+| ART-09 | Prose: sans, default font `17px` (user-adjustable in Settings), line-height `1.8`, dark text role `#d0d0d0` |
 | ART-10 | Prose `h2`: `18px`/`600`, top border `border-subtle` |
 | ART-11 | Prose `h3`: `15px`/`600` |
 | ART-12 | Prose blockquote: left border `2px`, bg-surface, radius right side |
@@ -120,7 +123,7 @@ Status legend used in the audit:
 | ID | Decision |
 |----|----------|
 | TOC-01 | Opened by swiping **up** from the article (and via the bottom pill tap) |
-| TOC-02 | Scrim behind sheet: `rgba(0,0,0,.55)`, tap to dismiss |
+| TOC-02 | Scrim behind sheet: black at opacity `.55` when open (animated with the sheet), tap to dismiss |
 | TOC-03 | Sheet: `66%` height, bg-surface, top radius `14px` |
 | TOC-04 | Drag handle: `36×4`, color `border` `#2e2e2e`, centered, `margin 10 auto 0` |
 | TOC-05 | Tab bar: bottom border `border-subtle` |
@@ -151,7 +154,7 @@ Status legend used in the audit:
 | GRAPH-07 | Legend explaining node/edge types |
 | GRAPH-08 | Node labels rendered near nodes |
 | GRAPH-09 | Tapping a node shows a **preview card** before opening (our agreed addition) |
-| GRAPH-10 | Canvas is pan/drag-able |
+| GRAPH-10 | Canvas is pan/drag-able (reanimated `Gesture.Pan` with pinch/tap) |
 
 ---
 
@@ -176,7 +179,7 @@ Status legend used in the audit:
 |----|----------|
 | GESTURE-01 | Article: swipe **up** → TOC sheet |
 | GESTURE-02 | Article: swipe **down** → graph view |
-| GESTURE-03 | Article: swipe **right** → back home |
+| GESTURE-03 | Article: swipe **right** from the left edge → back (Android only; iOS/macOS use the system gesture) |
 | GESTURE-04 | TOC sheet dismiss: tap scrim |
 
 ---
@@ -208,6 +211,10 @@ against the build's source. Latest run: **94 tests passing, 9 suites**.
 - **ART-09 prose line-height:** was `1.75`, mockup is `1.78`. Aligned.
 - **ART-19 backlinks row:** was entirely missing. Added a "N pages link here" row
   at the end of the article (taps open the graph).
+
+### Removed / changed after the design pass
+- **NAV-01…06 removed:** bottom nav no longer exists; replaced by inline Home tabs (HOME-TABS-01/02).
+- **HOME-08, ART-09, TOC-02, GESTURE-03, GRAPH-10** updated to the current intended behavior (see rows above).
 
 ### Open deviations — need a product decision (NOT auto-changed)
 - **HOME-15 / SEARCH-03 / SEARCH-07 — folders, category chips, category paths:**

@@ -33,5 +33,5 @@ describe('GRAPH — knowledge graph', () => {
   });
 
   test('GRAPH-10 canvas is pan/drag-able', () =>
-    expect(graph()).toMatch(/PanResponder/));
+    expect(graph()).toMatch(/Gesture\.Pan\(\)/));
 });
