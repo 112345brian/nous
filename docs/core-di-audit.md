@@ -30,7 +30,7 @@ because they leak state or globals into the logic that calls them.
 |---|---|---|---|---|---|
 | `services/dataSync.ts` | none | `expo-file-system`, `react-native` `Platform`, `fetch`, `db` | `Date` (Zotero "today"), `process.env.HOME` | `SyncFolder`, `UserDataStore`, `ZoteroHttp`, `Clock` | **Converted** (see section 4) |
 | `utils/linkifier.ts` | `_default` (lazy cache of the compiled link index) | none (bundled data module only) | none | the index as a parameter | **Converted**: `createLinkifier(json)`; the lazy default is the one recorded exception |
-| `services/catalog.ts` | none of its own | `./db` (about 20 functions), `./mathRender`, bundled `assets/entry-seed.json`, `fetch` x3 (index page, article page, notes page) | `Date.now` x3, `setTimeout` x7 (throttle sleeps), `AbortController` | `ArticleSource`, `LibraryStore`, `KeyValueStore`, `MathRenderer`, `Clock`, `Sleep`, `BundledIndex` | Listed (section 5); hot file, 3 sessions editing it |
+| `services/catalog.ts` | none of its own | `./db` (about 20 functions), `./mathRender`, bundled `assets/entry-seed.json`, `fetch` x3 (index page, article page, notes page) | `Date.now` x3, `setTimeout` x7 (throttle sleeps), `AbortController` | `ArticleSource`, `LibraryStore`, `KeyValueStore`, `MathRenderer`, `Clock`, `Sleep`, `BundledIndex` | `refreshIndexIfStale` **converted** (section 4); the rest is listed (section 5) |
 | `services/db.ts` | `_db` (connection), `metaCache`, `_linkCache` | `expo-sqlite` | `Date.now` x7 | it **is** the `LibraryStore` / `UserStore` / `KeyValueStore` adapter; nothing to inject into it | Listed; 4 sessions editing it |
 | `services/graphDb.ts` | `_schema` (creates its own tables lazily) | `getDb()` x4 from `./db` | `Date.now` x4 | `GraphStore` adapter; the graph assembly (nodes/edges from rows) is pure and could move inward | Listed |
 | `services/inpho.ts` | `_primedSlugs` (Set) | `fetch` (`getJson`), `expo-file-system` (dev-seed files, `__DEV__` only), `getMeta/setMeta` from `./db` | `Date.now` x2, `setTimeout` x1 | `GraphSource`, `KeyValueStore`, `Clock`, `Sleep` | Listed |
@@ -77,13 +77,16 @@ All conversions keep the old exported function names and signatures, so no calle
 | Sync-folder export/import (UC-H3, UC-H4) | `dataSync.ts` built `File`/`Directory`, read `Platform.OS` and `process.env.HOME` inline | `core/syncUserData.ts` takes `SyncFolder` + `UserDataStore` + an env value; path logic is the pure `utils/syncPath.ts`; `dataSync.ts` keeps `exportToSyncFolder` / `importFromSyncFolder` as wrappers around an `expo-file-system` adapter |
 | Zotero export (UC-E4) | `fetch`, `new Date()` and the version lookup inline | `core/zotero.ts` takes `ZoteroHttp`, a `versionDate` function and a `Clock`; the note/creator builders came along unchanged; `exportToZotero(apiKey, userId, item, annotations)` is a wrapper |
 | Link index (UC-C1 step) | `linkifyHtml` hard-wired to the bundled JSON | `createLinkifier(json)` is pure and testable with a tiny index; `linkifyHtml` is the lazy default |
+| Index refresh (UC-A3) | `catalog.refreshIndexIfStale` called `Date.now`, `fetch`, `./db` and the bundled seed directly | `core/refreshIndex.ts` takes `ArticleSource`, `LibraryIndexStore`, `KeyValueStore`, `Clock` and the bundled entries as a parameter; the contents-page parser and the link-index payload are pure (`utils/sepIndex.ts`); `catalog.refreshIndexIfStale()` is a wrapper with the same name, so `App.tsx` and `syncCachedArticles` are unchanged |
 
 Evidence: `src/services/__tests__/dataSync.test.ts` (14 tests, written before the change
 against the old code and **unchanged** afterwards), the linkifier snapshots (taken from
 the old code), plus new tests that run the core with plain in-memory fakes and make
 `Date.now` and `fetch` throw, to prove the core never reaches for them:
 `src/core/__tests__/*.test.ts`, `src/utils/__tests__/syncPath.test.ts`,
-`src/utils/__tests__/linkifier.test.ts`.
+`src/utils/__tests__/linkifier.test.ts`, `src/utils/__tests__/sepIndex.test.ts`. The index-refresh
+wrapper tests (`src/services/__tests__/refreshIndex.test.ts`, 17 tests) were also written
+before the move and are unchanged after it.
 
 Enforcement added to `innerRing.test.ts`: `src/core` is in the ring; it also fails on
 `process.*`, a bare `Date()`, module-level `let`/`var`, and an empty module-level
@@ -95,10 +98,9 @@ must still match a real violation, so they cannot go stale.
 Order is by value over risk, and by which files other sessions are editing. Start these
 only after the performance and db sessions have merged, to avoid conflicts.
 
-1. **`catalog.refreshIndexIfStale`** (UC-A3). Small, self-contained, three globals
-   (`Date.now`, `fetch`, bundled seed). Ports: `KeyValueStore`, `ArticleSource.fetchIndexHtml`,
-   `LibraryStore` (count, upsert, clean titles), `BundledIndex`, `Clock`. Gives the first
-   real use of `KeyValueStore` and `Clock` in a library use case.
+1. ~~`catalog.refreshIndexIfStale`~~ (UC-A3): **done**, see section 4. It introduced
+   `KeyValueStore`, `ArticleSource.fetchIndexHtml` and `LibraryIndexStore`; `BundledIndex`
+   turned out to be a plain data parameter (`bundledEntries`), not a port.
 2. **`catalog.fetchAndCacheArticle`** (UC-C1, C7). Highest value (the slow path) and the
    most conflicts: three performance sessions are editing it. Ports: `ArticleSource`,
    `MathRenderer`, `LibraryStore`, `Sleep`. Do it last of the catalog items, as one change.
@@ -162,7 +164,8 @@ Verified against the code. Please fold these into the draft.
 7. **Ports the draft is missing:**
    - `KeyValueStore` (`getMeta`/`setMeta`): used by `catalog`, `inpho`, `App.tsx`, onboarding.
    - `BundledIndex`: `refreshIndexIfStale` falls back to the bundled `entry-seed.json`
-     (title/link facts only, allowed by `AGENTS.md`) when the first launch is offline.
+     (title/link facts only, allowed by `AGENTS.md`) when the first launch is offline. It
+     needs no port: it is data, passed in as `bundledEntries`.
    - `SeedInstaller` (UC-A2): download a database, close the connection, replace the file.
    - `MathRenderer` is more than "TeX to SVG batch": it has a readiness lifecycle
      (`preloadMathJax`, `isMathWebViewReady`) that callers depend on.
@@ -183,6 +186,14 @@ Verified against the code. Please fold these into the draft.
   device `~/Sync` likely resolves to `file://Sync/sep_user.json` (not a valid URI). Needs a
   device check. With the new `SyncEnv`, the fix is to pass a real home directory from the
   adapter (for example from `expo-file-system` `Paths`).
+- **Suspected, not fixed (behaviour pinned in `refreshIndex.test.ts`):** after an offline
+  first launch the bundled seed is stamped as a successful refresh
+  (`index_refreshed_at = now`), so the app will not fetch the real index again for a week.
+  The seed has no `parent_label`, so until then the browse list has no parent grouping and
+  the link index is built from seed titles only. Probable fix: do not stamp the time when the
+  entries came from the seed.
+- **Suspected, not fixed (pinned):** a non-numeric `index_refreshed_at` value is treated as
+  fresh forever (`now - NaN > interval` is false), unless the library is empty.
 - `scripts/test-download.mjs`, `scripts/buildEntrySeed.js` and `scripts/auditCorpus.cjs`
   carry their own copies of `extractById`, `decodeEntities` and friends (now canonical in
   `src/utils/sepPage.ts`). They can drift.

@@ -136,7 +136,8 @@ describe('inner ring has no I/O', () => {
     expect(files.length).toBeGreaterThanOrEqual(15);
     for (const f of ['src/types.ts', 'src/utils/forceLayout.ts', 'src/utils/linkifier.ts', 'src/utils/sepHtml/parse.ts',
       'src/utils/sepPage.ts', 'src/utils/citation.ts', 'src/utils/contentHash.ts', 'src/utils/mathHash.ts',
-      'src/core/ports.ts', 'src/core/syncUserData.ts', 'src/core/zotero.ts', 'src/utils/syncPath.ts']) {
+      'src/core/ports.ts', 'src/core/syncUserData.ts', 'src/core/zotero.ts', 'src/utils/syncPath.ts',
+      'src/core/refreshIndex.ts', 'src/utils/sepIndex.ts']) {
       expect(files).toContain(f);
     }
     expect(files).not.toContain('src/utils/sepHtml/render/Blocks.tsx');

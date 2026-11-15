@@ -1,3 +1,5 @@
+import type { IndexEntry } from '../types';
+
 // Ports: the outward-facing interfaces the core needs. Plain TypeScript only.
 //
 // Direction of dependency: adapters (src/services, UI) import these types and
@@ -40,4 +42,27 @@ export interface ZoteroHttpResponse {
 export interface ZoteroHttp {
   /** POST `body` as JSON to `path` (e.g. '/items'), relative to the reader's library. */
   post(path: string, body: unknown): Promise<ZoteroHttpResponse>;
+}
+
+/** Small key/value settings and bookkeeping (the `meta` table today). */
+export interface KeyValueStore {
+  getMeta(key: string): Promise<string | null>;
+  setMeta(key: string, value: string): Promise<void>;
+}
+
+/** Where SEP pages come from. Grows as more use cases are converted (article page, notes page). */
+export interface ArticleSource {
+  /** Raw HTML of the SEP table of contents (contents.html). Rejects when it cannot be read. */
+  fetchIndexHtml(): Promise<string>;
+}
+
+/** The slice of the local library the index refresh needs. */
+export interface LibraryIndexStore {
+  getEntryCount(): Promise<number>;
+  upsertIndexEntries(entries: IndexEntry[]): Promise<void>;
+  cleanDenormalizedTitles(): Promise<void>;
+  /** All entry titles, longest first; the source for the link index. */
+  getAllEntryTitles(): Promise<{ slug: string; title: string }[]>;
+  /** Drop any in-memory copy of the link index so the next reader sees the new one. */
+  invalidateLinkCache(): void;
 }

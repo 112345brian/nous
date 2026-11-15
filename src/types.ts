@@ -69,3 +69,10 @@ export interface GraphNode {
   birthYear?: number | null; deathYear?: number | null; // Timeline view
 }
 export interface GraphEdge { from_slug: string; to_slug: string; weight?: number; }
+
+/** One row of the entry index (title list): what the index page and the bundled seed provide. */
+export interface IndexEntry {
+  slug: string;
+  title: string;
+  parent_label?: string | null;
+}
