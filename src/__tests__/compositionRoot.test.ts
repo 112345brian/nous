@@ -66,6 +66,9 @@ const CONVERTED = [
   'onMathReady', 'completeArticleMath', 'resumePendingMath',
   'backfillAst', 'ensureNotesCached', 'startPrefetch', 'scheduleCommonMathPrewarm',
   'idleScheduler', 'withDownloadHold', 'ensureMath',
+  // knowledge graph
+  'getGraph', 'getArticleLinkGraph', 'ensureInphoIndex', 'primeBackfillForSlugs', 'primeGraphLayouts',
+  'getLayoutCache', 'setLayoutCache', 'getNodePreview', 'getVisitedOnly', 'setVisitedOnly',
 ];
 
 // RC3 exceptions: a file other than composition.ts that still wires a core use case.
@@ -77,8 +80,7 @@ const WIRING_EXCEPTIONS: Array<{ file: string; reason: string }> = [];
 // The screens, components, useBoot and ThemeProvider now take the stores (readerState, bookmarkStore,
 // annotationStore, libraryRead, appPrefs, metaStore) and the UI use cases from the root. Only the
 // graph screen is left; the graph session owns it. When it moves, this list is empty and stays so.
-const DB_DIRECT_ALLOWLIST = [
-  'src/screens/GraphScreen.tsx', // owned by the graph session (core-graph); remove when it moves
+const DB_DIRECT_ALLOWLIST: string[] = [
 ];
 
 // What the root exports for the UI (stores and the use cases built over them).

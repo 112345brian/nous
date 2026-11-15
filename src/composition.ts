@@ -59,6 +59,11 @@ import { runAutoDeepSync as runAutoDeepSyncUseCase } from './core/autoDeepSync';
 import { prepareZoteroSend as prepareZoteroSendUseCase } from './core/zoteroSend';
 import { linkifyHtml } from './utils/linkifier';
 import seedEntries from './assets/entry-seed.json';
+// Knowledge graph (graph/InPhO slice)
+import { getDb, getEntryPreview, getEntryHtml as getEntryHtmlForGraph } from './services/db';
+import { createGraph } from './core/graph';
+import { createGraphStore } from './services/graphDb';
+import { inphoSource } from './services/inphoSource';
 
 declare const __DEV__: boolean | undefined;
 
@@ -441,3 +446,27 @@ export function importSeedFromUrl(url: string, onProgress: (p: SeedPhase) => voi
     onProgress,
   );
 }
+
+// ── Knowledge graph ──────────────────────────────────────────────────────────
+
+// The SEP link graph and the InPhO graphs, built once here. The graph tables, the InPhO source,
+// the settings, the clock and the pause are the only real things behind it; its one piece of state
+// (which slugs this session already primed) lives in this instance.
+const graph = createGraph({
+  source: inphoSource,
+  store: createGraphStore(getDb),
+  meta: { getMeta, setMeta },
+  clock: { now: () => Date.now() },
+  sleep,
+  articles: { getPreview: getEntryPreview, getHtml: getEntryHtmlForGraph },
+});
+export const getGraph = graph.getGraph;
+export const getArticleLinkGraph = graph.getArticleLinkGraph;
+export const ensureInphoIndex = graph.ensureInphoIndex;
+export const primeBackfillForSlugs = graph.primeBackfillForSlugs;
+export const primeGraphLayouts = graph.primeGraphLayouts;
+export const getLayoutCache = graph.getLayoutCache;
+export const setLayoutCache = graph.setLayoutCache;
+export const getNodePreview = graph.getNodePreview;
+export const getVisitedOnly = graph.getVisitedOnly;
+export const setVisitedOnly = graph.setVisitedOnly;

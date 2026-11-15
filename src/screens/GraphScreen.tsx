@@ -11,13 +11,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import { getEntryPreview, getEntryHtml, getMeta, setMeta } from '../services/db';
-import { makeExcerpt } from '../utils/excerpt';
-import { getArticleLinkGraph, getLayoutCache, setLayoutCache } from '../services/graphDb';
-import type { GraphNode, GraphEdge, GraphData, GraphView, CachedPosition } from '../services/graphDb';
+import {
+  getArticleLinkGraph, getGraph, getLayoutCache, setLayoutCache, getNodePreview, getVisitedOnly, setVisitedOnly,
+} from '../composition';
+import type { GraphNode, GraphEdge, GraphData, GraphView, CachedPosition } from '../types';
 import { forceLayout, slugSeed } from '../utils/forceLayout';
 import type { LayoutNode } from '../utils/forceLayout';
-import { getGraph } from '../services/inpho';
 import type { RootStackParamList } from '../../App';
 import { colors, themedStyles } from '../theme/tokens';
 
@@ -128,9 +127,9 @@ export default function GraphScreen() {
 
   const [mode, setMode] = useState<GraphView>('links');
   const [rawData, setRawData] = useState<GraphData | null>(null);
-  const [visitedOnly, setVisitedOnly] = useState(false);
-  useEffect(() => { getMeta('graph_visited_only').then(v => { if (v === '1') setVisitedOnly(true); }); }, []);
-  const toggleVisitedOnly = () => setVisitedOnly(v => { setMeta('graph_visited_only', v ? '0' : '1').catch(() => {}); return !v; });
+  const [visitedOnly, setVisitedOnlyState] = useState(false);
+  useEffect(() => { getVisitedOnly().then(v => { if (v) setVisitedOnlyState(true); }); }, []);
+  const toggleVisitedOnly = () => setVisitedOnlyState(v => { setVisitedOnly(!v).catch(() => {}); return !v; });
   const [nodes, setNodes] = useState<LayoutNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [loading, setLoading] = useState(true);
@@ -470,50 +469,10 @@ export default function GraphScreen() {
   const open = (slug: string, title: string) =>
     nav.push('Article', { slug, title });
 
-  // Find the sentence in `html` that contains a link to `linkSlug`.
-  const findLinkSentence = (html: string, linkSlug: string): string | null => {
-    const linkRe = new RegExp(`[^.!?]*<a [^>]*href=["'][^"']*\\/entries\\/${linkSlug}\\/[^"']*["'][^>]*>[^<]*<\\/a>[^.!?]*[.!?]?`, 'i');
-    const m = html.match(linkRe);
-    if (!m) return null;
-    // Strip all HTML tags, decode common entities, normalise whitespace
-    const decoded = m[0]
-      .replace(/<[^>]+>/g, '')
-      .replace(/&(?:ldquo|rdquo);/g, '"')
-      .replace(/&(?:lsquo|rsquo|squo);/g, "’")
-      .replace(/&(?:mdash|ndash);/g, '—')
-      .replace(/&hellip;/g, '…')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
-      .replace(/^[\s"'‘’“”.,;:]+/, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    return decoded.slice(0, 480) || null;
-  };
-
   const selectNode = (slug: string, title: string) => {
     setSelected({ slug, title });
     setPreview(null);
-    const wantContext = !!centerSlug && mode === 'links' && slug !== centerSlug;
-    Promise.all([
-      getEntryPreview(slug),
-      getEntryHtml(slug),
-      wantContext ? getEntryHtml(centerSlug) : Promise.resolve(null),
-    ]).then(([p, targetHtml, centerHtml]) => {
-      // Reference sentence: prefer the outgoing link in the center article, then
-      // fall back to a backlink to the center inside the target article.
-      const context = wantContext
-        ? (centerHtml ? findLinkSentence(centerHtml, slug) : null)
-          ?? (targetHtml ? findLinkSentence(targetHtml, centerSlug) : null)
-        : null;
-      // Pull a generous, on-the-fly excerpt straight from the cached body so the
-      // card shows real article content — not the short stored teaser.
-      const excerpt = targetHtml ? makeExcerpt(targetHtml, 1200) : (p?.excerpt ?? null);
-      setPreview({ author: p?.author ?? null, excerpt, context });
-    });
+    getNodePreview(slug, centerSlug ?? null, mode).then(setPreview);
   };
 
   // ── Label rendering helpers ───────────────────────────────────────────────

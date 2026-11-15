@@ -34,7 +34,9 @@ describe('DATA — backing behaviour', () => {
 
   test('DATA-04 graph preview uses a lightweight excerpt query', () => {
     expect(db()).toMatch(/getEntryPreview/);
-    expect(SRC.graph()).toMatch(/getEntryPreview/);
+    // The screen asks the root for the card (getNodePreview); the root wires it to getEntryPreview.
+    expect(SRC.graph()).toMatch(/getNodePreview/);
+    expect(require('fs').readFileSync(require('path').join(__dirname, '../../src/composition.ts'), 'utf8')).toMatch(/getPreview: getEntryPreview/);
   });
 });
 

@@ -17,7 +17,7 @@ import {
   libraryRead, readerState, bookmarkStore, annotationStore, metaStore,
 } from '../composition';
 import { perf } from '../services/perf';
-import { primeBackfillForSlugs, primeGraphLayouts } from '../services/inpho';
+import { primeBackfillForSlugs, primeGraphLayouts } from '../composition';
 import { buildArticleHtml } from '../utils/articleTemplate';
 import { parseSepHtml } from '../utils/sepHtml/parse';
 import { collectMathHashes } from '../utils/sepHtml/collectMathHashes';

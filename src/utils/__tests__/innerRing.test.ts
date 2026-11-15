@@ -142,7 +142,8 @@ describe('inner ring has no I/O', () => {
       'src/core/mathCompletion.ts', 'src/utils/sepMath.ts', 'src/core/libraryDownload.ts',
       'src/core/backfills.ts', 'src/core/ensureNotes.ts', 'src/core/idleScheduler.ts', 'src/core/mathPacing.ts',
       'src/core/mathChunked.ts', 'src/core/mathCache.ts', 'src/core/substituteMath.ts',
-      'src/core/downloadNotifier.ts', 'src/core/prefetch.ts']) {
+      'src/core/downloadNotifier.ts', 'src/core/prefetch.ts',
+      'src/core/graph.ts', 'src/core/graphAssembly.ts', 'src/utils/linkSentence.ts']) {
       expect(files).toContain(f);
     }
     expect(files).not.toContain('src/utils/sepHtml/render/Blocks.tsx');

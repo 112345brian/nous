@@ -92,8 +92,8 @@ missing behavior, see section 4.
 
 | ID | Use case | Summary | Code today | Status |
 |---|---|---|---|---|
-| UC-F1 | Explore the semantic graph | Zoomable graph of related entries; optionally only visited ones; open a node. | `GraphScreen`, `graphDb`, `inpho`, `forceLayout` | ok |
-| UC-F2 | See an influence timeline | Thinker dates and relations around an entry. | `inpho`, `graphDb` (dates backfill) | ok |
+| UC-F1 | Explore the semantic graph | Zoomable graph of related entries; optionally only visited ones; open a node. | `GraphScreen`, `core/graph`, `graphDb`, `inphoSource`, `forceLayout` | ok |
+| UC-F2 | See an influence timeline | Thinker dates and relations around an entry. | `core/graph`, `inphoSource`, `graphDb` (dates backfill) | ok |
 
 ### G. Offline library
 
@@ -147,7 +147,7 @@ Not behind a port yet, and why:
   core modules that take the clock, a timer and the interaction hook as parameters; the one
   app-wide instance is built in `composition.ts`, and the use cases see it as the injected
   `pause` and `substitute` functions.
-- **`GraphSource` / `GraphStore`** (F): `inpho.ts` and `graphDb.ts` are still called directly.
+- **`GraphSource` / `GraphStore`** (F): done. `core/graph.ts` holds the use cases, `services/graphDb.ts` and `services/inphoSource.ts` are the adapters, `composition.ts` wires them.
 - **`SecretStore`** (H2, E4): the Zotero key now lives in secure storage (`services/secureSecrets.ts`)
   and reaches the use case as a parameter; there is no port because nothing else needs one.
 - **`ProgressNotifier`** (G1): progress reaches the caller as a callback and the download

@@ -9,7 +9,7 @@ Status: **Accepted, amended 2026-06-23** · Date: 2026-06-23
 >   freezes the data until each app update. Instead the client fetches from
 >   inphoproject.org at runtime and caches in SQLite (same model as SEP article
 >   content) — no redistribution, license-clean, stays fresh. See
->   [`src/services/inpho.ts`](../src/services/inpho.ts) +
+>   [`src/core/graph.ts`](../src/core/graph.ts) (+ [`src/services/inphoSource.ts`](../src/services/inphoSource.ts)) +
 >   `inpho_nodes` / `inpho_relations` tables in [`db.ts`](../src/services/db.ts).
 > - **Scope widened from temporal-only → three graph views**, all fed by the same
 >   per-client InPhO fetch:
@@ -40,7 +40,7 @@ returns nodes/edges from the link index
 `{ slug, title }`. Philosophers appear solely as article titles — no entity type, no dates.
 
 **2. InPhO semantic graph subsystem (built, NOT yet wired into the UI).**
-[`src/services/inpho.ts`](../src/services/inpho.ts) + tables `inpho_nodes` /
+[`src/core/graph.ts`](../src/core/graph.ts) (+ [`src/services/inphoSource.ts`](../src/services/inphoSource.ts)) + tables `inpho_nodes` /
 `inpho_relations` in [`src/services/db.ts`](../src/services/db.ts) already implement:
 
 - `syncInphoIndex()` — downloads `/idea.json` + `/thinker.json`, stores
@@ -125,7 +125,7 @@ graph. In dependency order:
    is visible. Cheapest, highest-visibility step.
 
 2. **Stop discarding dates — capture them where they already flow.** In
-   `fetchRelations()` ([`inpho.ts`](../src/services/inpho.ts)) the detail payload `d`
+   `fetchRelations()` ([`graph.ts`](../src/core/graph.ts)) the detail payload `d`
    already contains `birth` / `death`. Persist them when present. Add `birth_year` /
    `death_year` columns to `inpho_nodes` (nullable; BCE = negative) and write them through.
    *Near-zero marginal cost — no new network calls for the center node.*
