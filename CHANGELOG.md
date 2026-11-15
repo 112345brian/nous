@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Removed
+- **Legacy-compatibility code** — the app is prerelease with no installs to carry forward, so code that only upgraded earlier builds is gone: the core schema (`sep.db`) and the graph schema are each a single initial migration (version 1); pre-`user_version` baselining, `ALTER TABLE … ADD COLUMN` duplicate handling and one-shot data migrations are removed; the Zotero key is no longer moved from `meta` into secure storage (a `meta` row is only the fallback when secure storage is unavailable); `syncOnLaunch` and the unused `getSemanticGraph` alias are deleted; import no longer accepts exports without a `prefs` field. The migration runner and the `ast_parser_version` derived-content mechanism stay.
+
+### Notes
+- **Dev devices must clear app data or reinstall.** Existing development databases (any `sep.db` created by an earlier build) will not open cleanly against the collapsed schema.
+
 ## [0.7.0]
 
 ### Added

@@ -134,8 +134,8 @@ async function restoreUserData(snap: UserDataSnapshot): Promise<void> {
   // importUserData writes only the synced-pref allowlist (it is the sync-file
   // format and must never carry credentials). The settings this swap preserves
   // (onboarding_done, sync_folder, zotero_user_id, ...) are not all in it, so
-  // write them back directly. A legacy zotero_api_key meta row goes back as a
-  // meta row, which the next read moves into secure storage.
+  // write them back directly. A zotero_api_key meta row (the fallback used when
+  // secure storage is unavailable) goes back as a meta row.
   for (const [key, value] of Object.entries(snap.data.prefs ?? {})) {
     await setMeta(key, value);
   }
