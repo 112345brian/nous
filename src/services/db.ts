@@ -6,6 +6,7 @@ import { formatCitation } from '../utils/citation';
 
 // Re-exported so existing callers (screens, on-device tests) keep importing from services/db.
 export { contentHash, formatCitation };
+import { buildFtsQuery } from '../utils/ftsQuery';
 import { mathTierStamp, TIERED_MATH_DEFAULT } from '../utils/mathTier';
 import { CORE_MIGRATIONS } from './coreMigrations';
 import { runMigrations, userVersionStore } from './migrations';
@@ -35,7 +36,7 @@ async function applyMathTierStamp(db: SQLite.SQLiteDatabase): Promise<void> {
       `UPDATE entries SET content_html = NULL, preamble_html = NULL, toc_html = NULL, notes_html = NULL,
        content_ast = NULL, excerpt = NULL, cached_at = NULL WHERE cached_at IS NOT NULL`
     );
-    await db.runAsync(`DELETE FROM meta WHERE key IN ('math_pending', 'math_inline_v2', 'math_hash_format_v1')`);
+    await db.runAsync(`DELETE FROM meta WHERE key IN ('math_pending', 'math_hash_format_v1')`);
   }
   await db.runAsync(`INSERT OR REPLACE INTO meta (key, value) VALUES ('math_tier_stamp', ?)`, [tierStamp]);
 }
@@ -212,7 +213,7 @@ export async function getMathArticleHtml(): Promise<Array<{ slug: string; conten
   return rows;
 }
 
-// Overwrite content_html and clear AST for a single entry. Used by backfillMathInline.
+// Overwrite content_html and clear AST for a single entry. Used by the math pipeline.
 // AST is cleared so ArticleScreen falls back to parseSepHtml; backfillAst re-populates it.
 export async function updateArticleHtml(slug: string, html: string): Promise<void> {
   const db = await getDb();
@@ -353,7 +354,7 @@ export async function searchEntries(query: string, limit = 60): Promise<EntrySum
       [limit]
     );
   }
-  const ftsQuery = query.trim().split(/\s+/).map(w => `"${w}"*`).join(' ');
+  const ftsQuery = buildFtsQuery(query) as string; // non-null: the blank case returned above
   return db.getAllAsync<EntrySummary>(
     `SELECT e.slug, e.title, e.parent_label, e.author, e.cached_at
      FROM entries_fts fts
@@ -612,13 +613,10 @@ export async function clearArticleCache(): Promise<void> {
   await db.runAsync(
     'UPDATE entries SET content_html = NULL, toc_html = NULL, preamble_html = NULL, cached_at = NULL'
   );
-  // Clear backfill flags so they re-run against the fresh downloads on next launch.
-  // Without this, articles re-downloaded with skipMath:true would be permanently
-  // stored with raw TeX because backfillMathInline sees the flag and returns early.
+  // Clear the backfill flag so it re-runs against the fresh downloads on next launch.
   await db.runAsync(
-    "DELETE FROM meta WHERE key IN ('math_inline_v2', 'math_hash_format_v1')"
+    "DELETE FROM meta WHERE key IN ('math_hash_format_v1')"
   );
-  metaCache.delete('math_inline_v2');
   metaCache.delete('math_hash_format_v1');
 }
 

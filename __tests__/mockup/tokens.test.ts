@@ -1,4 +1,4 @@
-// TOKEN-xx + NAV-xx — design tokens and bottom navigation.
+// TOKEN-xx + HOME-TABS-xx — design tokens and the inline home tabs (NAV-xx bottom nav was removed).
 import { SRC, flat } from './_src';
 
 describe('TOKEN — design tokens', () => {
@@ -33,17 +33,18 @@ describe('TOKEN — design tokens', () => {
   test('TOKEN-19 svg stroke width 1.8', () => expect(home()).toMatch(/strokeWidth=\{1\.8\}/));
 });
 
-describe('NAV — bottom navigation', () => {
+describe('HOME-TABS — inline tabs (replaced the bottom nav; see MOCKUP_SPEC NAV section)', () => {
   const home = () => flat(SRC.home());
 
-  test('NAV-01 nav height 56', () => expect(home()).toMatch(/bn:\s*\{[^}]*height:\s*56/));
-  test('NAV-01 nav top border #2e2e2e', () =>
-    expect(home()).toMatch(/borderTopColor:\s*C\.border|borderTopColor:\s*'#2e2e2e'/));
-  test('NAV-02 Home item', () => expect(home()).toContain('>Home<'));
-  test('NAV-02 Search item', () => expect(home()).toContain('>Search<'));
-  test('NAV-02 Notes item', () => expect(home()).toContain('>Notes<'));
-  test('NAV-04 active pill 56x30 radius 15', () =>
-    expect(home()).toMatch(/bnPill:\s*\{[^}]*width:\s*56[^}]*height:\s*30[^}]*borderRadius:\s*15/));
-  test('NAV-05 label 10px / 500', () =>
-    expect(home()).toMatch(/bnLabel:\s*\{[^}]*fontSize:\s*10[^}]*fontWeight:\s*'500'/));
+  test('HOME-TABS-01 Reading, Notes and Browse tabs in that order', () => {
+    const h = home();
+    const r = h.indexOf('>Reading</Text>'), n = h.indexOf('>Notes</Text>'), b = h.indexOf('>Browse</Text>');
+    expect(r).toBeGreaterThan(-1);
+    expect(n).toBeGreaterThan(r);
+    expect(b).toBeGreaterThan(n);
+  });
+  test('HOME-TABS-02 active tab shows an underline; no bottom nav bar remains', () => {
+    expect(home()).toMatch(/tabUnderline/);
+    expect(home()).not.toMatch(/\bbnPill\b|\bbn:\s*\{/);
+  });
 });

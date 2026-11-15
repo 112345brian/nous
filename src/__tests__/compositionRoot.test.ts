@@ -56,7 +56,7 @@ const importsFor = (f: string) => importsOf(f, read(f));
 
 const SRC = walk('src');
 const SERVICES = SRC.filter(f => f.startsWith('src/services/'));
-const UI = [...SRC.filter(f => f.startsWith('src/screens/') || f.startsWith('src/components/')), 'App.tsx'];
+const UI = [...SRC.filter(f => f.startsWith('src/screens/') || f.startsWith('src/components/') || f.startsWith('src/boot/')), 'App.tsx'];
 
 // The use cases that are wired in the root. UI must import these from the root, not from where
 // they used to live.
@@ -64,7 +64,7 @@ const CONVERTED = [
   'exportToSyncFolder', 'importFromSyncFolder', 'exportToZotero',
   'refreshIndexIfStale', 'fetchAndCacheArticle', 'downloadAll', 'syncCachedArticles',
   'onMathReady', 'completeArticleMath', 'resumePendingMath',
-  'backfillMathInline', 'backfillAst', 'ensureNotesCached', 'startPrefetch',
+  'backfillAst', 'ensureNotesCached', 'startPrefetch', 'scheduleCommonMathPrewarm',
 ];
 
 // RC3 exceptions: a file other than composition.ts that still wires a core use case.
@@ -74,7 +74,7 @@ const WIRING_EXCEPTIONS: Array<{ file: string; reason: string }> = [];
 
 // RC5: files outside the root that import the SQLite adapter (services/db) directly. Shrink-only.
 const DB_DIRECT_ALLOWLIST = [
-  'App.tsx',
+  'src/boot/useBoot.ts',          // the boot state machine moved here from App.tsx
   'src/components/OrphanedAnnotationsBanner.tsx',
   'src/screens/AnnotationsScreen.tsx',
   'src/screens/ArticleScreen.tsx',

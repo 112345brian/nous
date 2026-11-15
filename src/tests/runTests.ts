@@ -32,7 +32,7 @@ export interface TestReport {
 
 type AssertFn = (condition: boolean, message: string) => void;
 
-function makeAssert(errors: string[]): AssertFn {
+function makeAssert(): AssertFn {
   return (condition, message) => {
     if (!condition) throw new Error(`Assertion failed: ${message}`);
   };
@@ -216,8 +216,7 @@ export async function runTests(
     onUpdate([...results]);
 
     const t0 = Date.now();
-    const errors: string[] = [];
-    const assert = makeAssert(errors);
+    const assert = makeAssert();
     try {
       await TESTS[i].fn(assert);
       results[i] = { ...results[i], status: 'pass', durationMs: Date.now() - t0 };

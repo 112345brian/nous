@@ -44,10 +44,12 @@ export interface MathCompletion {
   /** Finish math for articles whose deferred render never completed. Sequential, yielding between articles. */
   resumePendingMath(): Promise<void>;
   /**
-   * Record the debt first so a kill mid-render resumes at next launch, then render.
-   * Does not wait. Errors stay inside the pipeline.
+   * Record the debt first so a kill mid-render resumes at next launch, then render at `priority`
+   * (default 'current'). Does not wait. Errors stay inside the pipeline.
    */
-  completeLater(slug: string, html: string): void;
+  completeLater(slug: string, html: string, priority?: MathPriority): void;
+  /** Record the debt only; resumePendingMath renders it later. Resolves once it is recorded. */
+  queueForLater(slug: string): Promise<void>;
 }
 
 export function createMathCompletion(deps: MathCompletionDeps): MathCompletion {
@@ -123,9 +125,13 @@ export function createMathCompletion(deps: MathCompletionDeps): MathCompletion {
     }
   }
 
-  function completeLater(slug: string, html: string): void {
-    updatePending(s => { s.add(slug); }).then(() => completeArticleMath(slug, html));
+  function completeLater(slug: string, html: string, priority: MathPriority = 'current'): void {
+    updatePending(s => { s.add(slug); }).then(() => completeArticleMath(slug, html, priority));
   }
 
-  return { onMathReady, completeArticleMath, resumePendingMath, completeLater };
+  function queueForLater(slug: string): Promise<void> {
+    return updatePending(s => { s.add(slug); });
+  }
+
+  return { onMathReady, completeArticleMath, resumePendingMath, completeLater, queueForLater };
 }

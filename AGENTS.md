@@ -21,6 +21,10 @@ the build), confirm it contains **none** of the following:
 
 Allowed to ship: app code, our own CSS/JS, the entry **title/link index** (slugs +
 titles — facts), and an **empty** SQLite schema.
+Also allowed: a small list of **hand-authored generic formulas** (textbook-standard TeX we
+write ourselves, e.g. `src/data/commonMath.ts`) — never SEP's strings, and never any rendering
+of them (SVGs are produced on-device at runtime). SEP-derived equations and renderings remain
+forbidden.
 
 CI enforces this: `scripts/check-no-bundled-content.js` (workflow
 `.github/workflows/no-bundled-content.yml`) fails the build on a tracked `.db`/`.sqlite`

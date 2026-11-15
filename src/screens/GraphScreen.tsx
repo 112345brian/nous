@@ -202,8 +202,7 @@ export default function GraphScreen() {
 
   // Frame the whole graph whenever the laid-out node set changes, so every node
   // is on-screen from the start (and after rotation). The same transform is the
-  // double-tap reset target. (shared values intentionally omitted from deps)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // double-tap reset target. (Shared values are stable refs; listed only to satisfy the rule.)
   useEffect(() => {
     if (!nodes.length) {
       fitScale.value = 1; fitTx.value = 0; fitTy.value = 0;
@@ -229,7 +228,7 @@ export default function GraphScreen() {
     fitScale.value = s; fitTx.value = tx; fitTy.value = ty;
     bMinX.value = minX; bMaxX.value = maxX; bMinY.value = minY; bMaxY.value = maxY;
     scale.value = s; translateX.value = tx; translateY.value = ty;
-  }, [nodes, width, canvasH]);
+  }, [nodes, width, canvasH, fitScale, fitTx, fitTy, bMinX, bMaxX, bMinY, bMaxY, scale, translateX, translateY]);
 
   // ── Gestures ─────────────────────────────────────────────────────────────
   // A single tap maps a screen point back to world space and selects the
@@ -242,7 +241,6 @@ export default function GraphScreen() {
   // Build the gesture exactly once. Every value it closes over is either a
   // shared value or a stable callback, so an empty dep list is correct and the
   // GestureDetector never re-attaches a fresh gesture during an active pinch.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const gesture = useMemo(() => {
     // Clamp one axis. When the node cloud fits within the viewport (i.e. at the
     // fit scale, which is also the minimum zoom) it is centred and locked — no
@@ -322,6 +320,9 @@ export default function GraphScreen() {
       });
 
     return Gesture.Simultaneous(Gesture.Exclusive(dtap, stap), pan, pinch);
+    // The rule wants every `.value` read inside the worklets listed, which would read
+    // shared values during render and rebuild the gesture mid-pinch. They are stable refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Latest tap implementation — reassigned every render so it always sees the
@@ -378,7 +379,8 @@ export default function GraphScreen() {
   // ── Layout — recomputes whenever data or dimensions change (rotation re-lays
   // without re-fetching). The seeded PRNG ensures stable scatter per entry+mode.
   useEffect(() => {
-    if (!rawData || displayData.nodes.length === 0) return;
+    // displayData is empty whenever rawData is null, so this also covers "no data yet".
+    if (displayData.nodes.length === 0) return;
     setEdges(displayData.edges);
 
     if (mode === 'timeline') {

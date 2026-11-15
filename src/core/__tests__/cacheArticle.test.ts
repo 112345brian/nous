@@ -19,6 +19,8 @@ function world(o: {
   const cached: Array<{ slug: string; data: CachedArticleFields }> = [];
   const indexed: Array<[string, string]> = [];
   const deferred: Array<[string, string]> = [];
+  const deferredPriorities: unknown[] = [];
+  const queued: string[] = [];
   const stages: string[] = [];
   const deps: CacheArticleDeps = {
     source: {
@@ -39,7 +41,8 @@ function world(o: {
     },
     math: {
       substitute: async html => { log.push('substitute'); if (o.substituteFails) throw new Error('renderer'); return html.replace(/\\\(.*?\\\)/g, '<math-i hash="h"></math-i>'); },
-      completeLater: (slug, html) => { log.push('completeLater'); deferred.push([slug, html]); },
+      completeLater: (slug, html, priority) => { log.push('completeLater'); deferred.push([slug, html]); deferredPriorities.push(priority); },
+      queueForLater: async slug => { log.push('queue'); queued.push(slug); },
     },
     timing: {
       time: async (_k, stage, fn) => { stages.push(stage); return fn(); },
@@ -47,7 +50,7 @@ function world(o: {
     },
     linkify: html => html.replace('Plain', '[Plain]'),
   };
-  return { deps, log, cached, indexed, deferred, stages };
+  return { deps, log, cached, indexed, deferred, deferredPriorities, queued, stages };
 }
 
 describe('fetchAndCacheArticle with fakes', () => {
@@ -96,11 +99,32 @@ describe('fetchAndCacheArticle with fakes', () => {
       await fetchAndCacheArticle(w.deps, 'b');
       expect(seen).toEqual([null]);
     });
-    test('skipMath: raw TeX, no rendering, nothing deferred', async () => {
+    test('skipMath: raw TeX, no rendering started; the article is queued for the resume pass', async () => {
       const w = world({ page: TEX });
       await fetchAndCacheArticle(w.deps, 'a', { skipMath: true });
-      expect(w.log).toEqual(['fetch:a', 'cache', 'index']);
+      expect(w.log).toEqual(['fetch:a', 'cache', 'index', 'queue']);
       expect(w.cached[0].data.content_html).toContain('\\(x\\)');
+      expect(w.queued).toEqual(['a']);
+      expect(w.deferred).toEqual([]);
+    });
+    test('the deferred render runs at the priority asked for, current by default', async () => {
+      const w = world({ page: TEX });
+      await fetchAndCacheArticle(w.deps, 'a');
+      await fetchAndCacheArticle(w.deps, 'b', { deferPriority: 'background' });
+      expect(w.deferredPriorities).toEqual(['current', 'background']);
+    });
+    test('the queue happens only for articles that have TeX and were skipped', async () => {
+      const plain = world();
+      await fetchAndCacheArticle(plain.deps, 'a', { skipMath: true });
+      expect(plain.queued).toEqual([]);
+      const tex = world({ page: TEX });
+      await fetchAndCacheArticle(tex.deps, 'a', { awaitMath: true });
+      expect(tex.queued).toEqual([]);
+    });
+    test('a failure recording the queue fails the call (the debt is part of caching it)', async () => {
+      const w = world({ page: TEX });
+      w.deps.math.queueForLater = async () => { throw new Error('db'); };
+      expect(await fetchAndCacheArticle(w.deps, 'a', { skipMath: true })).toBe(false);
     });
     test('skipMath wins over awaitMath', async () => {
       const w = world({ page: TEX });

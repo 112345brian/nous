@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, LogBox, StatusBar } from 'react-native';
 
 LogBox.ignoreAllLogs();
@@ -7,19 +7,11 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { NavigationContainerRef } from '@react-navigation/native';
-import { getEntryCount, getMeta, getPrefs, getRecentSlugs, savePrefs } from './src/services/db';
+import { useBoot } from './src/boot/useBoot';
 import { ThemeProvider, useScheme, withTheme } from './src/theme/ThemeProvider';
 import { withWideFrame } from './src/components/WideFrame';
 import { isReduceMotion } from './src/utils/motion';
 import { APP_ACCENT } from './src/utils/sepHtml/render/theme';
-import { importSeedFromUrl } from './src/services/seedImport';
-import type { SeedPhase } from './src/services/seedImport';
-import { backfillMathHashFormat } from './src/services/catalog';
-import { refreshIndexIfStale, downloadAll, syncCachedArticles, backfillAst, backfillMathInline } from './src/composition';
-import { preloadMathJax } from './src/services/mathRender';
-import { idleScheduler } from './src/services/idleScheduler';
-import { withDownloadHold } from './src/services/mathPriority';
-import type { Prefs } from './src/services/db';
 import { IS_TEST_BUILD } from './src/testConfig';
 import MathRenderWebView from './src/components/MathRenderWebView';
 import TestRunnerScreen from './src/screens/TestRunnerScreen';
@@ -32,7 +24,6 @@ import OnboardingScreen from './src/screens/OnboardingScreen';
 import AnnotationsScreen from './src/screens/AnnotationsScreen';
 import GraphScreen from './src/screens/GraphScreen';
 import LoadingArticleScreen from './src/screens/LoadingArticleScreen';
-import { startDownloadNotification, updateDownloadNotification, finishDownloadNotification } from './src/services/downloadNotification';
 import { colors, themedStyles, palettes, type Scheme } from './src/theme/tokens';
 
 export type RootStackParamList = {
@@ -106,135 +97,30 @@ function ThemedStatusBar() {
   return <StatusBar barStyle={scheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={colors.bg} />;
 }
 
-type AppPhase = 'booting' | 'onboarding' | 'seeding' | 'seed_error' | 'indexing' | 'index_error' | 'ready';
-
 export default function App() {
   return (
     <ThemeProvider>
       <ThemedStatusBar />
-      <AppInner />
+      {IS_TEST_BUILD ? <TestApp /> : <MainApp />}
     </ThemeProvider>
   );
 }
 
-function AppInner() {
+function TestApp() {
+  return (
+    <SafeAreaProvider>
+      <TestRunnerScreen />
+    </SafeAreaProvider>
+  );
+}
+
+function MainApp() {
   const { scheme } = useScheme(); // re-render the shell when the scheme changes
-  if (IS_TEST_BUILD) {
-    return (
-      <SafeAreaProvider>
-        <TestRunnerScreen />
-      </SafeAreaProvider>
-    );
-  }
-
-  const [phase, setPhase] = useState<AppPhase>('booting');
-  const [seedPhase, setSeedPhase] = useState<SeedPhase | null>(null);
   const navRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
-
-  useEffect(() => {
-    boot().catch(() => setPhase('index_error'));
+  const openArticle = useCallback((slug: string, title: string) => {
+    navRef.current?.navigate('Article', { slug, title });
   }, []);
-
-  async function boot() {
-    const onboardingDone = await getMeta('onboarding_done');
-    if (!onboardingDone) {
-      setPhase('onboarding');
-      return;
-    }
-    await initialize(await getPrefs());
-  }
-
-  async function initialize(prefs: Prefs) {
-    const count = await getEntryCount();
-
-    if (count === 0) {
-      setPhase('indexing');
-      try {
-        await refreshIndexIfStale();
-        const newCount = await getEntryCount();
-        if (newCount === 0) { setPhase('index_error'); return; }
-      } catch {
-        setPhase('index_error');
-        return;
-      }
-    } else {
-      await refreshIndexIfStale();
-    }
-
-    setPhase('ready');
-
-    // Everything below is fire-and-forget — errors must NOT propagate to boot().catch(),
-    // which would snap the phase from 'ready' back to 'index_error'.
-    (async () => {
-      if (prefs.homeMode === 'continue') {
-        getRecentSlugs(1).then(recent => {
-          if (recent.length > 0) {
-            setTimeout(() => {
-              navRef.current?.navigate('Article', {
-                slug: recent[0].slug,
-                title: recent[0].title,
-              });
-            }, 100);
-          }
-        }).catch(() => {});
-      }
-
-      // Preload MathJax eagerly only if the math backfill hasn't completed yet
-      // (meaning there are cached articles whose TeX still needs SVG rendering)
-      // or if a bulk download is about to bring in new articles that will need it.
-      // Otherwise let it load lazily on first use — no point paying boot cost.
-      const mathDone = await getMeta('math_inline_v2');
-      if (!mathDone || prefs.downloadAll) preloadMathJax();
-
-      if (prefs.downloadAll) {
-        await startDownloadNotification();
-        let lastTotal = 0;
-        await downloadAll(p => {
-          lastTotal = p.total;
-          updateDownloadNotification(p.done, p.total).catch(() => {});
-        }, undefined, prefs.libraryScope);
-        finishDownloadNotification(lastTotal).catch(() => {});
-      }
-
-      // Heavy catch-up work runs one task at a time, only while the reader is idle
-      // (and never while an article is opening or scrolling). The scheduler swallows
-      // task errors, so nothing here can reach boot().catch().
-      idleScheduler.schedule('backfill-math-inline', backfillMathInline);
-      idleScheduler.schedule('backfill-math-hash-format', backfillMathHashFormat);
-      idleScheduler.schedule('backfill-ast', backfillAst);
-      idleScheduler.schedule('auto-deep-sync', async () => {
-        const [autoSync, lastDeepSync] = await Promise.all([getMeta('auto_sync'), getMeta('last_deep_sync')]);
-        if (autoSync && autoSync !== 'off') {
-          const days = autoSync === '2days' ? 2 : 7;
-          const elapsed = Date.now() - (lastDeepSync ? Number(lastDeepSync) : 0);
-          if (elapsed > days * 24 * 60 * 60 * 1000) {
-            await syncCachedArticles(() => {});
-          }
-        }
-      });
-    })().catch(() => {});
-  }
-
-  async function handleOnboardingDone(prefs: Prefs) {
-    if (prefs.seedUrl) {
-      setPhase('seeding');
-      try {
-        await withDownloadHold(() => importSeedFromUrl(prefs.seedUrl, p => setSeedPhase(p)));
-      } catch {
-        setPhase('seed_error');
-        return;
-      }
-      setSeedPhase(null);
-    }
-    // Save prefs after any seed import so they land in the final DB, not the pre-seed one.
-    await savePrefs(prefs);
-    setPhase('indexing');
-    try {
-      await initialize(prefs);
-    } catch {
-      setPhase('index_error');
-    }
-  }
+  const { phase, seedPhase, onOnboardingDone: handleOnboardingDone } = useBoot(openArticle);
 
   // Always mounted so the math backfill can use it during boot.
   const mathWebView = <MathRenderWebView />;

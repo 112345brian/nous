@@ -1,6 +1,6 @@
-// Gaps in the pins of backfillMathInline / backfillAst (see catalog.backfillMathInline.test.ts and
-// catalog.backfillAst.test.ts for the main paths). Written BEFORE the two functions moved into
-// src/core and kept unchanged afterwards apart from the import path.
+// The AST backfill and ensureNotesCached as seen through the composition root's exports. Written BEFORE
+// they moved into src/core and kept unchanged afterwards apart from the import path. (The one-shot
+// backfillMathInline that used to be tested here was removed upstream.)
 const mockMeta: Record<string, string> = {};
 const mockEntries: Record<string, string> = {};
 let mockMathArticles: Array<{ slug: string; content_html: string }> = [];
@@ -27,7 +27,7 @@ jest.mock('../mathRender', () => ({ renderMathBatch: (...a: unknown[]) => mockRe
 
 import * as db from '../db';
 import { _resetMathCacheState } from '../mathCache';
-import { backfillMathInline, backfillAst, ensureNotesCached } from '../../composition';   // wired in the composition root
+import { backfillAst, ensureNotesCached } from '../../composition';   // wired in the composition root
 import { parseSepHtml } from '../../utils/sepHtml/parse';
 
 const m = db as jest.Mocked<typeof db>;
@@ -42,36 +42,6 @@ beforeEach(() => {
   mockMathArticles = []; mockUncachedAst = [];
   mockRender.mockImplementation(okRender);
   m.setArticleAst.mockImplementation(async () => {});
-});
-
-describe('backfillMathInline works from the current copy of each article', () => {
-  test('a reader-triggered rewrite since the snapshot is not overwritten with stale text', async () => {
-    mockMathArticles = [{ slug: 'a', content_html: '<p>SNAPSHOT \\(a\\)</p>' }];
-    mockEntries.a = '<p>CURRENT \\(a\\)</p>';
-    await backfillMathInline();
-    expect(mockEntries.a).toContain('CURRENT');
-    expect(mockEntries.a).not.toContain('SNAPSHOT');
-    expect(mockEntries.a).toContain('<math-i ');
-  });
-
-  test('an article that vanished since the snapshot falls back to the snapshot text', async () => {
-    mockMathArticles = [{ slug: 'gone', content_html: '<p>SNAPSHOT \\(g\\)</p>' }];
-    await backfillMathInline();
-    expect(m.updateArticleHtml).toHaveBeenCalledTimes(1);
-    expect(mockEntries.gone).toContain('SNAPSHOT');
-  });
-
-  test('the one-shot flag is set even when there was nothing to do', async () => {
-    await backfillMathInline();
-    expect(mockMeta.math_inline_v2).toBe('1');
-    expect(m.updateArticleHtml).not.toHaveBeenCalled();
-  });
-
-  test('a failure reading the article list leaves the flag unset so it is retried at next launch', async () => {
-    m.getMathArticleHtml.mockRejectedValueOnce(new Error('db'));
-    await expect(backfillMathInline()).rejects.toThrow('db');
-    expect(mockMeta.math_inline_v2).toBeUndefined();
-  });
 });
 
 describe('backfillAst', () => {

@@ -25,7 +25,6 @@ export interface MathResult {
 }
 
 let injectFn: ((js: string) => void) | null = null;
-let domReady = false;
 let resolveReady: (() => void) | null = null;
 let readyPromise: Promise<void> = new Promise(r => { resolveReady = r; });
 let mathJaxLoading: Promise<void> | null = null;
@@ -41,7 +40,6 @@ export function _registerInject(fn: (js: string) => void): void {
 // Called by MathRenderWebView when the WebView DOM is ready (onLoadEnd).
 // Does NOT inject MathJax — that happens via preloadMathJax() or first render.
 export function _signalDomReady(): void {
-  domReady = true;
   // If preloadMathJax was called before the DOM was ready, kick it off now.
   if (mathJaxLoading === null) return;
   // Nothing to do — mathJaxLoading promise is already in flight and will inject
@@ -68,7 +66,6 @@ export function _onMessage(raw: string): void {
 // Reset hook for the component remounting (dev hot-reload safety).
 export function _resetReady(): void {
   if (!injectFn) {
-    domReady = false;
     mathJaxLoading = null;
     readyPromise = new Promise(r => { resolveReady = r; });
   }

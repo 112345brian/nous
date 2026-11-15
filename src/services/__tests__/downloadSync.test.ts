@@ -131,15 +131,30 @@ describe('downloadAll', () => {
     expect(p.calls.every(c => c.total === 5)).toBe(true);
   });
 
-  test('articles are cached as text only: equations are left for the backfill', async () => {
+  // The one-shot inline-math backfill was removed upstream. A bulk download now queues each article
+  // that has TeX on math_pending and drains the queue once the download hold is released.
+  test('articles are cached as text only and queued: no equation is rendered during the download', async () => {
     m.getSlugsByCacheStatus.mockResolvedValue({ uncached: [{ slug: 'logic', title: 'Logic' }], cached: [] });
     instantFetch({ logic: page('logic', '<p>Let \\(x\\) be a set.</p>') });
+    let rendersDuringDownload = -1;
+    const run = downloadAll(p => { if (p.done === 1) rendersDuringDownload = mockRender.mock.calls.length; });
+    await jest.runAllTimersAsync(); await run;
+    const cached = m.cacheArticle.mock.calls[0][1] as any;
+    expect(cached.content_html).toContain('\\(x\\)');            // cached as text with the raw TeX
+    expect(cached.has_math).toBe(1);
+    expect(rendersDuringDownload).toBe(0);                          // nothing rendered while downloading
+  });
+
+  test('once the download is over the queued math is drained (rendered, article rewritten, queue emptied)', async () => {
+    m.getSlugsByCacheStatus.mockResolvedValue({ uncached: [{ slug: 'logic', title: 'Logic' }], cached: [] });
+    instantFetch({ logic: page('logic', '<p>Let \\(x\\) be a set.</p>') });
+    m.getEntryHtml.mockResolvedValue('<p>Let \\(x\\) be a set.</p>');
     const run = downloadAll(() => {});
     await jest.runAllTimersAsync(); await run;
-    const cachedHtml = (m.cacheArticle.mock.calls[0][1] as any).content_html;
-    expect(cachedHtml).toContain('\\(x\\)');
-    expect(mockRender).not.toHaveBeenCalled();
-    expect(mockMeta.math_pending).toBeUndefined();
+    await jest.runAllTimersAsync();
+    expect(mockRender).toHaveBeenCalled();
+    expect(m.updateArticleHtml).toHaveBeenCalledWith('logic', expect.stringContaining('<math-i'));
+    expect(JSON.parse(mockMeta.math_pending ?? '[]')).toEqual([]);
   });
 
   test('quirk: an article that fails to download still counts as done', async () => {

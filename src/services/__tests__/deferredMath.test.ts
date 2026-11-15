@@ -118,11 +118,11 @@ test('awaitMath keeps the old behavior: SVG refs are in the first cached HTML', 
   expect(mockMeta.math_pending).toBeUndefined();
 });
 
-test('skipMath leaves raw TeX and schedules nothing', async () => {
+test('skipMath leaves raw TeX, renders nothing, and queues the slug on math_pending', async () => {
   await fetchAndCacheArticle('logic', { skipMath: true });
   await flush();
   expect(mockRender).not.toHaveBeenCalled();
-  expect(mockMeta.math_pending).toBeUndefined();
+  expect(JSON.parse(mockMeta.math_pending)).toEqual(['logic']);
 });
 
 test('renderer timeout: article stays text-only, stays pending, no notification', async () => {

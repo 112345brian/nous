@@ -7,8 +7,12 @@
 //                    rewrite the article when done. Resolves without waiting for MathJax.
 //   awaitMath      — render equations first; for bulk sync where nobody is waiting
 //                    on the first paint.
-//   skipMath       — leave raw TeX; bulk download defers to the math backfill.
+//   skipMath       — leave raw TeX and queue the slug on the pending list only; no rendering
+//                    is started (bulk download; the resume pass drains the list later).
+//   deferPriority  — priority of the deferred render (default 'current'; prefetch passes
+//                    'background' so a neighbour never competes with the reader).
 import type { ArticleLibrary, ArticleMath, ArticleSource, StageTimer } from './ports';
+import type { MathPriority } from '../utils/mathThrottlePolicy';
 import { parseSepHtml } from '../utils/sepHtml/parse';
 import { extractArticleParts, hasTex, referencesNotes, stripArticleHeader } from '../utils/sepArticlePage';
 
@@ -21,7 +25,7 @@ export interface CacheArticleDeps {
   linkify(html: string): string;
 }
 
-export interface CacheArticleOptions { skipMath?: boolean; awaitMath?: boolean }
+export interface CacheArticleOptions { skipMath?: boolean; awaitMath?: boolean; deferPriority?: MathPriority }
 
 /** Resolves true when the article is cached; false on any failure (nothing is thrown). */
 export async function fetchAndCacheArticle(
@@ -41,7 +45,7 @@ export async function fetchAndCacheArticle(
 
     const linkedHtml = timing.timeSync(slug, 'linkify', () => deps.linkify(contentHtml));
     const hasMath = hasTex(linkedHtml);
-    // Substitute math unless caller opted out (bulk download defers to the math backfill).
+    // Substitute math unless caller opted out (bulk download queues it on the pending list).
     const deferMath = hasMath && !opts.skipMath && !opts.awaitMath;
     const finalHtml = hasMath && !opts.skipMath && opts.awaitMath
       // awaitMath callers (the bulk sync) run under their own download hold: gating on the
@@ -67,9 +71,14 @@ export async function fetchAndCacheArticle(
     }));
     // Index outgoing links for graph view
     library.indexLinks(slug, contentHtml).catch(() => {});
-    // Fire-and-forget: the implementation records the debt first so a kill
-    // mid-render resumes at next launch.
-    if (deferMath) math.completeLater(slug, finalHtml);
+    if (deferMath) {
+      // Fire-and-forget: the implementation records the debt first so a kill
+      // mid-render resumes at next launch.
+      math.completeLater(slug, finalHtml, opts.deferPriority ?? 'current');
+    } else if (hasMath && opts.skipMath) {
+      // Record the debt only; the resume pass renders it later at background priority.
+      await math.queueForLater(slug);
+    }
     return true;
   } catch {
     return false;

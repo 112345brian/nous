@@ -84,8 +84,17 @@ export interface ArticleMath {
    * caller already owns the schedule, so the renderer must not wait on it.
    */
   substitute(html: string, priority?: MathPriority | null): Promise<string>;
-  /** Render this cached article's equations in the background and rewrite it when done. Does not wait. */
-  completeLater(slug: string, html: string): void;
+  /**
+   * Render this cached article's equations in the background and rewrite it when done. Does not
+   * wait. `priority` defaults to 'current' (the reader is looking at it); prefetch passes
+   * 'background' so a neighbouring article never competes with the reader.
+   */
+  completeLater(slug: string, html: string, priority?: MathPriority): void;
+  /**
+   * Record that this cached article still has unrendered equations, and do nothing more: a later
+   * resume pass renders it at background priority. Resolves once the debt is recorded.
+   */
+  queueForLater(slug: string): Promise<void>;
 }
 
 /** Dev-only stage timing; structurally the same as `Perf` in utils/perf.ts. */
@@ -124,10 +133,8 @@ export interface LibraryCacheStatus {
   getCachedSlugs(): Promise<EntryRef[]>;
 }
 
-/** Work lists for the one-time background passes over cached articles. */
+/** Work lists for the background passes over cached articles. */
 export interface LibraryBackfillStore {
-  /** Cached articles that contain TeX, with the body as it was when listed. */
-  getMathArticleHtml(): Promise<Array<{ slug: string; content_html: string }>>;
   /** Slugs of cached articles that have no stored AST yet. */
   getUncachedAstSlugs(): Promise<string[]>;
 }

@@ -37,8 +37,8 @@ export async function downloadAll(
   // Emit once upfront so callers always see the real total, even on a fully-cached library.
   onProgress({ done, total, current: '' });
 
-  // Skip math rendering during bulk download — the math backfill runs after
-  // and handles all math articles in one pass. Rendering math inline here
+  // Skip math rendering during bulk download — each article is queued on the pending list and
+  // drained afterwards (resumePendingMath, background priority). Rendering math inline here
   // requires a WebView round-trip per equation and turns a 20-min download
   // into a 2-hour one for a library with ~450 math articles.
   for (let i = 0; i < uncached.length; i += DOWNLOAD_CONCURRENCY) {

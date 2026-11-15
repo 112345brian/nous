@@ -156,6 +156,21 @@ describe('createMathCompletion with fakes', () => {
     expect(w.pending()).toEqual([]);     // and cleared again once rendering finished
   });
 
+  test('queueForLater records the debt and nothing else; completeLater renders at the priority given', async () => {
+    const seen: string[] = [];
+    const w = world({ entries: { a: TEX, b: TEX } });
+    const inner = w.deps.substitute;
+    w.deps.substitute = async (html, priority) => { seen.push(priority); return inner(html, priority); };
+    const mc = createMathCompletion(w.deps);
+    await mc.queueForLater('a');
+    expect(w.pending()).toEqual(['a']);
+    expect(seen).toEqual([]);                                   // nothing rendered
+    mc.completeLater('b', TEX, 'background');
+    await new Promise<void>(r => setTimeout(r, 0));
+    await new Promise<void>(r => setTimeout(r, 0));
+    expect(seen).toEqual(['background']);
+  });
+
   test('resumePendingMath: one at a time, in order, pausing at background priority before each, surviving failures', async () => {
     const w = world({ entries: { a: TEX, b: TEX }, pending: ['a', 'missing', 'b'] });
     await createMathCompletion(w.deps).resumePendingMath();

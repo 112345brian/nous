@@ -25,8 +25,10 @@ describe('HOME — home screen', () => {
   test('HOME-07 section label 11 / 600 uppercase', () =>
     expect(home()).toMatch(/secLabel:\s*\{[^}]*fontSize:\s*11[^}]*fontWeight:\s*'600'[^}]*textTransform:\s*'uppercase'/));
 
-  test('HOME-08 "Continue reading" section', () =>
-    expect(SRC.home()).toMatch(/Continue reading/));
+  test('HOME-08 Reading tab has Bookmarks and Recent sections', () => {
+    expect(SRC.home()).toMatch(/styles\.secLabel\}>Bookmarks</);
+    expect(SRC.home()).toMatch(/styles\.secLabel\}>Recent</);
+  });
 
   test('HOME-09 page row gap 14, padding 13/16, bottom border', () =>
     expect(home()).toMatch(/pageRow:\s*\{[^}]*gap:\s*14[^}]*paddingHorizontal:\s*16[^}]*paddingVertical:\s*13/));

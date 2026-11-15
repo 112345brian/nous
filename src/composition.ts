@@ -11,7 +11,7 @@ import {
   getSyncFolder, exportUserData, importUserData, getArticleVersionDate,
   getSlugsByCacheStatus, getCachedSlugs, getMeta, setMeta,
   upsertIndexEntries, cacheArticle, getEntryCount, indexLinks, getAllEntryTitles, invalidateLinkCache,
-  cleanDenormalizedTitles, getEntryHtml, updateArticleHtml, setArticleAst, getMathArticleHtml,
+  cleanDenormalizedTitles, getEntryHtml, updateArticleHtml, setArticleAst,
   getUncachedAstSlugs, setEntryNotes,
   type UserDataExport, type BookmarkRow,
 } from './services/db';
@@ -21,15 +21,19 @@ import { exportUserDataToFolder, importUserDataFromFolder } from './core/syncUse
 import { exportBookmarkToZotero } from './core/zotero';
 import { downloadAll as downloadAllUseCase, syncCachedArticles as syncCachedUseCase } from './core/libraryDownload';
 import { refreshIndexIfStale as refreshIndexUseCase } from './core/refreshIndex';
-import { fetchAndCacheArticle as cacheArticleUseCase } from './core/cacheArticle';
+import { fetchAndCacheArticle as cacheArticleUseCase, type CacheArticleOptions } from './core/cacheArticle';
 import { createMathCompletion } from './core/mathCompletion';
-import { backfillMathInline as backfillMathInlineUseCase, backfillAst as backfillAstUseCase } from './core/backfills';
+import { backfillAst as backfillAstUseCase } from './core/backfills';
 import { ensureNotesCached as ensureNotesUseCase } from './core/ensureNotes';
 import { fetchIndexHtml, fetchArticleHtml, fetchNotesHtml, substitutemath } from './services/catalog';
 import { expoSyncFolder } from './services/expoSyncFolder';
 import { zoteroHttp } from './services/zoteroHttp';
 import { startPrefetch as startPrefetchAdapter } from './services/prefetch';
 import { withDownloadHold, yieldThenMathMayRun, watchStalls } from './services/mathPriority';
+import { ensureMath } from './services/mathCache';
+import { idleScheduler } from './services/idleScheduler';
+import { prewarmCommonMath, type PrewarmDeps } from './core/prewarmCommonMath';
+import { COMMON_MATH, commonMathStamp } from './data/commonMath';
 import { perf } from './services/perf';
 import { linkifyHtml } from './utils/linkifier';
 import seedEntries from './assets/entry-seed.json';
@@ -108,15 +112,15 @@ export const resumePendingMath = mathCompletion.resumePendingMath;
 //                    without waiting for MathJax.
 //   awaitMath      — render equations first (old behavior); for bulk sync where
 //                    nobody is waiting on the first paint.
-//   skipMath       — leave raw TeX; bulk download defers to backfillMathInline.
-export function fetchAndCacheArticle(
-  slug: string,
-  opts: { skipMath?: boolean; awaitMath?: boolean } = {},
-): Promise<boolean> {
+//   skipMath       — leave raw TeX and queue the slug on the pending list only; no rendering
+//                    is started (bulk download; resumePendingMath drains the list).
+//   deferPriority  — priority of the deferred render (default 'current'; prefetch passes
+//                    'background' so a neighbour never competes with the reader).
+export function fetchAndCacheArticle(slug: string, opts: CacheArticleOptions = {}): Promise<boolean> {
   return cacheArticleUseCase({
     source: { fetchArticleHtml, fetchNotesHtml },
     library: { cacheArticle, indexLinks },
-    math: { substitute: substitutemath, completeLater: mathCompletion.completeLater },
+    math: { substitute: substitutemath, completeLater: mathCompletion.completeLater, queueForLater: mathCompletion.queueForLater },
     timing: perf,
     linkify: linkifyHtml,
   }, slug, opts);
@@ -138,11 +142,13 @@ export function downloadAll(
   signal?: AbortSignal,
   scope: LibraryScope = 'all',
 ): Promise<void> {
-  // A download hold keeps equation rendering and background tasks paused while it runs.
+  // A download hold keeps equation rendering and background tasks paused while it runs. It is
+  // released before the queued math is drained; resumePendingMath still pauses per article for
+  // any hold or reader activity, so it never renders during a download.
   return withDownloadHold(() => downloadAllUseCase(
     { library: { getSlugsByCacheStatus }, cacheArticle: fetchAndCacheArticle, sleep },
     onProgress, signal, scope,
-  ));
+  )).finally(() => { void resumePendingMath().catch(() => {}); });
 }
 
 export function syncCachedArticles(
@@ -162,22 +168,9 @@ export function syncCachedArticles(
   ));
 }
 
-// ── Background passes over cached articles ───────────────────────────────────
+// ── Background pass over cached articles ─────────────────────────────────────
 
-// One-time pass: render the equations of articles cached as raw TeX. Starts by finishing any
-// deferred math a previous run left pending.
-export function backfillMathInline(): Promise<void> {
-  return backfillMathInlineUseCase({
-    resumePendingMath,
-    meta: { getMeta, setMeta },
-    library: { getMathArticleHtml },
-    articles: { getEntryHtml, updateArticleHtml },
-    substitute: substitutemath,
-    pause: yieldThenMathMayRun,
-  });
-}
-
-// One-time pass: pre-parse the AST of cached articles that have none.
+// Background pass: pre-parse the AST of cached articles that have none.
 export function backfillAst(): Promise<void> {
   return backfillAstUseCase({
     library: { getUncachedAstSlugs },
@@ -193,5 +186,37 @@ export function backfillAst(): Promise<void> {
  * links. Returns a cancel function: call it on navigation/unmount. Never throws.
  */
 export function startPrefetch(slug: string): () => void {
-  return startPrefetchAdapter(slug, s => fetchAndCacheArticle(s, { skipMath: true }));
+  return startPrefetchAdapter(slug, s => fetchAndCacheArticle(s, { deferPriority: 'background' }));
 }
+
+// ── Common-equation pre-warm ─────────────────────────────────────────────────
+
+// Connects prewarmCommonMath (src/core) to the app: the db meta row that holds the stamp,
+// mathCache.ensureMath at the lowest priority, and the idle scheduler. useBoot calls
+// scheduleCommonMathPrewarm() once, after the other idle tasks.
+//
+// Never-during-reading/scroll/download is not re-implemented here: the task starts only when the
+// scheduler is idle, and ensureMath(..., 'background') awaits the priority model
+// (src/utils/mathThrottlePolicy.ts) before every chunk, so a reading or download hold, or recent
+// scroll/touch, pauses it at the next chunk boundary. The priority must stay 'background' (a test
+// guards this).
+export const COMMON_MATH_META_KEY = 'common_math_prewarm';
+export const COMMON_MATH_TASK_KEY = 'prewarm-common-math';
+
+export function realPrewarmDeps(): PrewarmDeps {
+  return {
+    list: COMMON_MATH,
+    stamp: commonMathStamp(),
+    ensure: spots => ensureMath(spots, 'background'),
+    getStamp: () => getMeta(COMMON_MATH_META_KEY),
+    setStamp: s => setMeta(COMMON_MATH_META_KEY, s),
+  };
+}
+
+export function scheduleCommonMathPrewarm(
+  scheduler: Pick<typeof idleScheduler, 'schedule'> = idleScheduler,
+  deps: PrewarmDeps = realPrewarmDeps(),
+): boolean {
+  return scheduler.schedule(COMMON_MATH_TASK_KEY, () => prewarmCommonMath(deps));
+}
+

@@ -6,7 +6,9 @@ describe('TOC — bottom sheet', () => {
   const toc = () => flat(SRC.toc());
 
   test('TOC-02 scrim rgba(0,0,0,0.55) tap to dismiss', () => {
-    expect(toc()).toMatch(/backdrop:\s*\{[^}]*rgba\(0,0,0,0?\.55\)/);
+    // Scrim is black whose opacity is animated from 0.55 (sheet open) to 0 (closed).
+    expect(toc()).toMatch(/backdrop:\s*\{[^}]*backgroundColor:\s*'rgba\(0,0,0,1\)'/);
+    expect(toc()).toMatch(/outputRange:\s*\[0\.55,\s*0\]/);
     expect(SRC.toc()).toMatch(/onPress=\{onClose\}/);
   });
 

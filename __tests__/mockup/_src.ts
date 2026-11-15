@@ -2,7 +2,8 @@
 // These tests assert that the build's SOURCE encodes each documented UI decision
 // from blind-design/MOCKUP_SPEC.md. They read files directly (no RN render), so
 // they are deterministic and fast. A failing test = a spec item the build is
-// missing or diverging from.
+// missing or diverging from. Note they check that the source ENCODES a decision,
+// not that it renders or behaves correctly; pair them with real device checks.
 
 // Use require() + local declares so this helper needs no @types/node.
 declare const __dirname: string;

@@ -72,6 +72,23 @@ test('reading hold: article text is cached and math stays recorded as pending, u
   expect(JSON.parse(mockMeta.math_pending)).toEqual([]);
 });
 
+test('prefetch path (deferPriority background): queued, held while reading, then rendered and announced', async () => {
+  const { onMathReady } = require('../../composition');
+  const ready = jest.fn();
+  const off = onMathReady(ready);
+  const release = idleScheduler.hold('reading'); // user opened the prefetched article
+  await fetchAndCacheArticle('t', { deferPriority: 'background' });
+  await tick(60_000);
+  expect(mockRender).not.toHaveBeenCalled();
+  expect(JSON.parse(mockMeta.math_pending)).toEqual(['t']);
+  expect(mockEntries.t.content_html).toContain('\\(x\\)');
+  release();
+  await tick(5000);
+  expect(mockEntries.t.content_html).toContain('<math-i ');
+  expect(ready).toHaveBeenCalledWith('t'); // ArticleScreen swaps the AST on this
+  off();
+});
+
 test('scroll activity pauses current-article math until the reader is quiet again', async () => {
   idleScheduler.noteActivity();
   const p = completeArticleMath('x', '<p>\\(x\\)</p>');
@@ -96,9 +113,11 @@ test('downloadAll holds math for its whole duration, then math resumes', async (
   finishFetch();
   await tick(1000);
   await dl;
-  await tick(1000);
+  await tick(5000);
   await cur;
-  expect(mockRender).toHaveBeenCalledTimes(1);
+  // 'x' (current) plus the downloaded article, drained after the hold ended.
+  expect(mockRender).toHaveBeenCalledTimes(2);
+  expect(JSON.parse(mockMeta.math_pending)).toEqual([]);
 });
 
 test('downloadAll releases its hold when it throws', async () => {
