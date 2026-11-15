@@ -138,7 +138,7 @@ describe('inner ring has no I/O', () => {
       'src/utils/sepPage.ts', 'src/utils/citation.ts', 'src/utils/contentHash.ts', 'src/utils/mathHash.ts',
       'src/core/ports.ts', 'src/core/syncUserData.ts', 'src/core/zotero.ts', 'src/utils/syncPath.ts',
       'src/core/refreshIndex.ts', 'src/utils/sepIndex.ts', 'src/core/cacheArticle.ts', 'src/utils/sepArticlePage.ts',
-      'src/core/mathCompletion.ts', 'src/utils/sepMath.ts']) {
+      'src/core/mathCompletion.ts', 'src/utils/sepMath.ts', 'src/core/libraryDownload.ts']) {
       expect(files).toContain(f);
     }
     expect(files).not.toContain('src/utils/sepHtml/render/Blocks.tsx');

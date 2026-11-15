@@ -62,14 +62,14 @@ const UI = [...SRC.filter(f => f.startsWith('src/screens/') || f.startsWith('src
 // they used to live.
 const CONVERTED = [
   'exportToSyncFolder', 'importFromSyncFolder', 'exportToZotero',
-  'refreshIndexIfStale', 'fetchAndCacheArticle',
+  'refreshIndexIfStale', 'fetchAndCacheArticle', 'downloadAll', 'syncCachedArticles',
   'onMathReady', 'completeArticleMath', 'resumePendingMath',
 ];
 
 // RC3 exceptions: a file other than composition.ts that still wires a core use case.
 const WIRING_EXCEPTIONS: Array<{ file: string; reason: string }> = [
   { file: 'src/services/catalog.ts',
-    reason: 'downloadAll, syncCachedArticles and the backfills still call these use cases, so moving the wiring to the root would make catalog and composition import each other; goes away when those functions are converted' },
+    reason: 'backfillMathInline still calls resumePendingMath from the math-completion instance created here, so moving the wiring to the root would make catalog and composition import each other; goes away when that backfill is converted or removed' },
 ];
 
 // RC5: files outside the root that import the SQLite adapter (services/db) directly. Shrink-only.

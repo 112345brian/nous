@@ -1,4 +1,4 @@
-import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getSlugsByCacheStatus, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, getMathArticleHtml, updateArticleHtml, setArticleAst, getUncachedAstSlugs, getEntryHtml, putMath, putMathBatch, getMathSvgMap, setEntryNotes } from './db';
+import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, getMathArticleHtml, updateArticleHtml, setArticleAst, getUncachedAstSlugs, getEntryHtml, putMath, putMathBatch, getMathSvgMap, setEntryNotes } from './db';
 import { linkifyHtml } from '../utils/linkifier';
 import seedEntries from '../assets/entry-seed.json';
 import { renderMathBatch } from './mathRender';
@@ -170,70 +170,6 @@ export function refreshIndexIfStale(): Promise<void> {
     clock: { now: () => Date.now() },
     bundledEntries: seedEntries as IndexEntry[],
   });
-}
-
-export type DownloadProgress = {
-  done: number;
-  total: number;
-  current: string;
-};
-
-export async function downloadAll(
-  onProgress: (p: DownloadProgress) => void,
-  signal?: AbortSignal,
-  scope: 'all' | 'sep' | 'owl' = 'all'
-): Promise<void> {
-  const { uncached, cached } = await getSlugsByCacheStatus(scope);
-  // Report progress against the full library so a resumed download shows
-  // "900 / 1800" rather than "0 / 900", making it clear work wasn't lost.
-  const alreadyDone = cached.length;
-  const total = uncached.length + alreadyDone;
-  let done = alreadyDone;
-
-  // Emit once upfront so callers always see the real total, even on a fully-cached library.
-  onProgress({ done, total, current: '' });
-
-  // Skip math rendering during bulk download — backfillMathInline runs after
-  // and handles all math articles in one pass. Rendering math inline here
-  // requires a WebView round-trip per equation and turns a 20-min download
-  // into a 2-hour one for a library with ~450 math articles.
-  const CONCURRENCY = 6;
-  for (let i = 0; i < uncached.length; i += CONCURRENCY) {
-    if (signal?.aborted) return;
-    const chunk = uncached.slice(i, i + CONCURRENCY);
-    await Promise.all(chunk.map(({ slug, title }) =>
-      fetchAndCacheArticle(slug, { skipMath: true }).then(() => {
-        // Increment inside .then() so each article fires its own progress event
-        // rather than batching. done++ after await in concurrent callbacks can
-        // read the same value twice; .then() serializes via microtask queue safely
-        // because each closure captures a separate resolve tick.
-        onProgress({ done: ++done, total, current: title });
-      })
-    ));
-    await new Promise<void>(r => setTimeout(r, 100));
-  }
-}
-
-export async function syncCachedArticles(
-  onProgress: (p: DownloadProgress) => void,
-  signal?: AbortSignal
-): Promise<void> {
-  await refreshIndexIfStale();
-  const slugs = await getCachedSlugs();
-  const total = slugs.length;
-  let done = 0;
-  const CONCURRENCY = 3;
-  for (let i = 0; i < slugs.length; i += CONCURRENCY) {
-    if (signal?.aborted) return;
-    const chunk = slugs.slice(i, i + CONCURRENCY);
-    await Promise.all(chunk.map(async ({ slug, title }) => {
-      await fetchAndCacheArticle(slug, { awaitMath: true });
-      done++;
-      onProgress({ done, total, current: title });
-    }));
-    await new Promise<void>(r => setTimeout(r, 200));
-  }
-  await setMeta('last_deep_sync', String(Date.now()));
 }
 
 // Math handling (articles with TeX only):

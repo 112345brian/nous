@@ -49,16 +49,19 @@ which found none). It builds the concrete adapters and hands them to the core us
 screens and `App.tsx` import the converted use cases from it. What it owns and what it does
 not yet:
 
-- **Wired in the root:** sync-folder export/import and Zotero export. Their adapters are
-  `services/expoSyncFolder.ts` and `services/zoteroHttp.ts`; the user-data store is a small
-  object over `services/db`; platform and home directory are read here, at the edge.
+- **Wired in the root:** sync-folder export/import and Zotero export (adapters:
+  `services/expoSyncFolder.ts`, `services/zoteroHttp.ts`; the user-data store is a small object
+  over `services/db`; platform and home directory are read here, at the edge), and
+  `downloadAll` / `syncCachedArticles`, built from the re-exported use cases below plus the
+  library queries and a timer-backed `sleep`.
 - **Re-exported from `services/catalog.ts`:** `refreshIndexIfStale`, `fetchAndCacheArticle`,
   `onMathReady`, `completeArticleMath`, `resumePendingMath`. `catalog.ts` still wires these
-  itself, because `downloadAll`, `syncCachedArticles` and the backfills call them. Moving that
-  wiring into the root first would make `catalog.ts` and `composition.ts` import each other.
-  Once those functions are converted, the wiring moves and the re-export becomes real code.
-  Callers already import from the root, so nothing changes for them.
-- `App.tsx` still wires `downloadAll(onProgress, ...)` to the download notifier and calls
+  itself, because the one remaining caller inside it, `backfillMathInline`, calls
+  `resumePendingMath` from the math-completion instance created there. Moving that wiring into
+  the root first would make `catalog.ts` and `composition.ts` import each other. Once that
+  backfill is converted (or removed by `delete-legacy-compat`), the wiring moves and the
+  re-export becomes real code. Callers already import from the root, so nothing changes for them.
+- `App.tsx` still wires the download progress callback to the download notifier and calls
   `preloadMathJax()` itself.
 - `components/MathRenderWebView.tsx` still registers itself into a module-level bridge in
   `services/mathRender.ts` (`_registerInject`, `_onMessage`, `_signalDomReady`).
@@ -93,13 +96,17 @@ All conversions keep the old exported function names and signatures, so no calle
 | Article caching (UC-C1, C7) | `catalog.fetchAndCacheArticle` called `fetch`, `AbortController`, `./db`, the math pipeline, `perf` and `linkifyHtml` directly | `core/cacheArticle.ts` takes `ArticleSource`, `ArticleLibrary`, `ArticleMath`, `StageTimer` and a `linkify` function; page extraction, header stripping and the TeX/footnote checks are pure (`utils/sepArticlePage.ts`); `catalog.fetchAndCacheArticle(slug, opts)` is a wrapper, and the 30 s abort plus the `fetch`/`fetch-body` timing stay in a small adapter beside it, so callers (`ArticleScreen`, `prefetch`, `downloadAll`, `syncCachedArticles`, `runTests`) are unchanged |
 | Deferred-math completion (UC-C6) | `catalog.ts` held `pendingChain`, `mathReadyListeners` and `mathInFlight` as module-level singletons, plus the read-modify-write on `math_pending` | `core/mathCompletion.ts`: `createMathCompletion({ substitute, articles, meta, sleep })` keeps all state in a closure; `catalog.ts` creates the one app instance and re-exports `onMathReady`, `completeArticleMath` and `resumePendingMath` under the same names, so `ArticleScreen` and `backfillMathInline` are unchanged. `substitutemath` is deliberately **not** moved (see section 5) and is injected. The "is TeX left?" check is the pure, stateless `utils/sepMath.hasTexSpan` |
 | Composition root | wiring spread over `services/dataSync.ts` and `services/catalog.ts`; UI imported use cases from wherever they lived | `src/composition.ts` owns the sync/Zotero wiring and re-exports the catalog-wired use cases; `ArticleScreen`, `SettingsScreen`, `ReadingListScreen` and `App.tsx` import them from it; `dataSync.ts` keeps only the legacy `syncOnLaunch` no-op that `delete-legacy-compat` removes (left alone so that change still applies) |
+| Bulk download and sync (UC-G1, G2) | `catalog.downloadAll` / `syncCachedArticles` called `fetchAndCacheArticle`, `refreshIndexIfStale`, `./db`, `setTimeout` and `Date.now` directly | `core/libraryDownload.ts` takes the library queries, the bound `cacheArticle` and `refreshIndex` use cases, a `Clock`, `KeyValueStore` and a `Sleep`; the group sizes and pauses (6 / 100 ms and 3 / 200 ms) are named constants; `DownloadProgress` moved to `types.ts`; the wrappers live in `composition.ts` (they only need use cases it already imports one way), so `catalog.ts` lost about 60 lines and `SettingsScreen` and `App.tsx` import them from the root |
 
 Evidence: `src/services/__tests__/dataSync.test.ts` (14 tests, written before the change
 against the old code and **unchanged** afterwards), the linkifier snapshots (taken from
 the old code), plus new tests that run the core with plain in-memory fakes and make
 `Date.now` and `fetch` throw, to prove the core never reaches for them:
 `src/core/__tests__/*.test.ts`, `src/utils/__tests__/syncPath.test.ts`,
-`src/utils/__tests__/linkifier.test.ts`, `src/utils/__tests__/sepIndex.test.ts`. The math-completion tests
+`src/utils/__tests__/linkifier.test.ts`, `src/utils/__tests__/sepIndex.test.ts`. The bulk-download tests
+(`src/services/__tests__/downloadSync.test.ts`, 19 tests: concurrency, pacing with fake timers, progress, abort, the sync timestamp)
+were written against the old functions and are unchanged after the move apart from the import path; dropping the pause after each
+group is caught by 2 tests. The math-completion tests
 (`src/services/__tests__/mathCompletion.test.ts`, 13 tests) were written against the old state machine and are
 unchanged after the move; disabling the in-flight de-duplication is caught by 2 of them plus the perf session's. The article-caching
 wrapper tests (`src/services/__tests__/fetchAndCache.test.ts`, 16 tests) and the perf session's
@@ -134,9 +141,12 @@ only after the performance and db sessions have merged, to avoid conflicts.
    delete-versus-modify conflict, so it was left in place and injected. Do it right after
    `tiered-math` merges. `backfillMathHashFormat` and `backfillMathInline` belong with it
    (the second calls `resumePendingMath`); `delete-legacy-compat` may remove them first.
-3. **`catalog.downloadAll` / `syncCachedArticles` / backfills** (UC-G1, G2, A4). Already
-   inject progress and cancellation; the rest is `LibraryStore`, `Sleep`, `Clock`.
-   Overlaps the idle-scheduler work (`Scheduler`).
+3. ~~`downloadAll` / `syncCachedArticles`~~ (UC-G1, G2): **done**, see section 4. What is left of
+   this item is the backfills (UC-A4): `backfillAst`, `backfillMathHashFormat`,
+   `backfillMathInline`. `backfillMathInline` is the last thing in `catalog.ts` that calls a
+   converted use case (`resumePendingMath`) and so the last blocker for moving the catalog wiring
+   into the root. The `math-throttle` session is working on it and `delete-legacy-compat` may remove
+   it, so wait for both. The overlap with the idle scheduler (`Scheduler`) is in `App.tsx`, not here.
 4. **Auto-sync decision in `App.tsx`** (lines ~166-171): a duplicated staleness rule
    (`Date.now() - last > days`), same shape as `refreshIndexIfStale` and the InPhO TTL in
    `inpho.ensureInphoIndex`. Extract one pure `isStale(now, last, ttl)` into `utils` and
@@ -244,6 +254,15 @@ Verified against the code. Please fold these into the draft.
 - **Behaviour to know (pinned):** `completeArticleMath(slug, html)` returns the in-flight
   promise for that slug even if called with a different `html`, and a completion that finds no
   TeX left in an unchanged article counts as done and notifies listeners.
+- **Suspected, not fixed (pinned in `downloadSync.test.ts`):** in both `downloadAll` and
+  `syncCachedArticles` an article that fails to download is counted as done (the result of the
+  fetch is never inspected), so progress reaches 100% even if everything failed. Worse,
+  `syncCachedArticles` then records `last_deep_sync`, which `App.tsx` uses to decide when to
+  sync next, so a sync run offline marks the library as freshly synced and the next auto-sync
+  waits two to seven days. Probable fix: count only successes and record the time only if at
+  least one article was refreshed (or report failures to the caller).
+- **Minor (pinned):** `downloadAll` also pauses 100 ms after the last group, which delays the
+  end of the download for nothing.
 - **Dead work removed:** `fetchAndCacheArticle` computed `extractTitle(html)` and never used it
   (the title comes from the index). The conversion drops it, which also clears one lint error.
 - `scripts/test-download.mjs`, `scripts/buildEntrySeed.js` and `scripts/auditCorpus.cjs`

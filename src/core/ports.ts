@@ -1,4 +1,4 @@
-import type { EntryRow, IndexEntry } from '../types';
+import type { EntryRef, EntryRow, IndexEntry, LibraryScope } from '../types';
 
 // Ports: the outward-facing interfaces the core needs. Plain TypeScript only.
 //
@@ -107,4 +107,14 @@ export interface ArticleMathStore {
   updateArticleHtml(slug: string, html: string): Promise<void>;
   /** The article's pre-parsed AST as JSON. */
   setArticleAst(slug: string, ast: string): Promise<void>;
+}
+
+/** Waits `ms` milliseconds; how the core paces itself without owning a timer. */
+export type Sleep = (ms: number) => Promise<void>;
+
+/** Which entries are in the local library already, for the bulk download and sync loops. */
+export interface LibraryCacheStatus {
+  getSlugsByCacheStatus(scope: LibraryScope): Promise<{ uncached: EntryRef[]; cached: EntryRef[] }>;
+  /** Every cached entry (all scopes). */
+  getCachedSlugs(): Promise<EntryRef[]>;
 }

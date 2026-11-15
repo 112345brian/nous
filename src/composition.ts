@@ -5,21 +5,25 @@
 //
 // What lives here today:
 //   - sync-folder export/import and Zotero export (wired here, adapters in services/)
+//   - downloadAll and syncCachedArticles (wired here from the use cases re-exported below)
 // What is re-exported from services/catalog.ts for now:
 //   - refreshIndexIfStale, fetchAndCacheArticle, onMathReady, completeArticleMath,
-//     resumePendingMath. catalog.ts still wires these itself because downloadAll,
-//     syncCachedArticles and the backfills call them; moving the wiring here before those are
-//     converted would make catalog.ts and this file import each other. When they are converted,
-//     the wiring moves here and the re-export below becomes real code.
+//     resumePendingMath. catalog.ts still wires these itself because backfillMathInline calls
+//     resumePendingMath; moving the wiring here first would make catalog.ts and this file
+//     import each other. When that backfill is converted (or removed), the wiring moves here
+//     and the re-export below becomes real code.
 import { Platform } from 'react-native';
 import {
   getSyncFolder, exportUserData, importUserData, getArticleVersionDate,
+  getSlugsByCacheStatus, getCachedSlugs, setMeta,
   type UserDataExport, type BookmarkRow,
 } from './services/db';
-import type { Annotation } from './types';
+import type { Annotation, DownloadProgress, LibraryScope } from './types';
 import type { UserDataStore } from './core/ports';
 import { exportUserDataToFolder, importUserDataFromFolder } from './core/syncUserData';
 import { exportBookmarkToZotero } from './core/zotero';
+import { downloadAll as downloadAllUseCase, syncCachedArticles as syncCachedUseCase } from './core/libraryDownload';
+import { refreshIndexIfStale, fetchAndCacheArticle } from './services/catalog';
 import { expoSyncFolder } from './services/expoSyncFolder';
 import { zoteroHttp } from './services/zoteroHttp';
 
@@ -60,6 +64,38 @@ export function exportToZotero(
     { http: zoteroHttp(apiKey, userId), versionDate: getArticleVersionDate, clock: { now: () => Date.now() } },
     item,
     annotations,
+  );
+}
+
+// ── Bulk download and sync ───────────────────────────────────────────────────
+
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
+export function downloadAll(
+  onProgress: (p: DownloadProgress) => void,
+  signal?: AbortSignal,
+  scope: LibraryScope = 'all',
+): Promise<void> {
+  return downloadAllUseCase(
+    { library: { getSlugsByCacheStatus }, cacheArticle: fetchAndCacheArticle, sleep },
+    onProgress, signal, scope,
+  );
+}
+
+export function syncCachedArticles(
+  onProgress: (p: DownloadProgress) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return syncCachedUseCase(
+    {
+      library: { getCachedSlugs },
+      refreshIndex: refreshIndexIfStale,
+      cacheArticle: fetchAndCacheArticle,
+      meta: { setMeta },
+      clock: { now: () => Date.now() },
+      sleep,
+    },
+    onProgress, signal,
   );
 }
 

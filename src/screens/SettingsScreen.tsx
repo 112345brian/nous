@@ -13,8 +13,8 @@ import {
   getEntryCounts,
 } from '../services/db';
 import type { Prefs } from '../services/db';
-import { downloadAll, syncCachedArticles } from '../services/catalog';
-import type { DownloadProgress } from '../services/catalog';
+import { downloadAll, syncCachedArticles } from '../composition';
+import type { DownloadProgress } from '../types';
 import { exportToSyncFolder, importFromSyncFolder } from '../composition';
 import { importSeedFromUrl } from '../services/seedImport';
 import type { RootStackParamList } from '../../App';

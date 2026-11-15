@@ -76,3 +76,16 @@ export interface IndexEntry {
   title: string;
   parent_label?: string | null;
 }
+
+/** Which part of the library an operation covers: SEP entries, OWL entries, or both. */
+export type LibraryScope = 'all' | 'sep' | 'owl';
+
+/** An entry as the download and sync loops see it. */
+export interface EntryRef { slug: string; title: string }
+
+/** Progress of a bulk download or sync. */
+export type DownloadProgress = {
+  done: number;
+  total: number;
+  current: string;
+};
