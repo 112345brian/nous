@@ -36,7 +36,7 @@ jest.mock('expo-file-system', () => {
   };
 });
 jest.mock('expo-file-system/legacy', () => require('./seedImportWorld').fakeLegacyFs);
-jest.mock('../db', () => require('./seedImportWorld').fakeDbModule);
+jest.mock('../db', () => require('./helpers/mockDbModule').asDbModule(require('./seedImportWorld').fakeDbModule));
 
 import * as seed from '../../core/seedImport';
 import { importSeedFromUrl } from '../../composition';

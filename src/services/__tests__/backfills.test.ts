@@ -5,7 +5,7 @@ const mockMeta: Record<string, string> = {};
 const mockEntries: Record<string, string> = {};
 let mockUncachedAst: string[] = [];
 
-jest.mock('../db', () => ({
+jest.mock('../db', () => require('./helpers/mockDbModule').asDbModule({
   getMeta: jest.fn(async (k: string) => mockMeta[k] ?? null),
   setMeta: jest.fn(async (k: string, v: string) => { mockMeta[k] = v; }),
   getUncachedAstSlugs: jest.fn(async () => mockUncachedAst),
@@ -23,7 +23,9 @@ jest.mock('../db', () => ({
 const mockRender = jest.fn();
 jest.mock('../../core/mathBridge', () => ({ createMathBridge: () => require('./fakeMathBridge').fakeMathBridge((...a: unknown[]) => mockRender(...a)) }));
 
-import * as db from '../db';
+import * as dbModule from '../db';
+import type { Db } from '../db';
+const db = dbModule as unknown as jest.Mocked<Db>;
 import { _resetMathCacheState } from '../../composition';   // the math runtime is built in the root
 import { backfillAst, ensureNotesCached } from '../../composition';   // wired in the composition root
 import { parseSepHtml } from '../../utils/sepHtml/parse';

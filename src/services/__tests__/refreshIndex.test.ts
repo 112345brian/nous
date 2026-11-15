@@ -1,10 +1,12 @@
 // Behaviour of catalog.refreshIndexIfStale as seen by its callers (App.tsx, syncCachedArticles).
 // Written BEFORE the logic moved into src/core and kept unchanged afterwards. db and fetch are fakes.
 import { refreshIndexIfStale } from '../../composition';   // wired in the composition root
-import * as db from '../db';
+import * as dbModule from '../db';
+import type { Db } from '../db';
+const db = dbModule as unknown as jest.Mocked<Db>;
 import seed from '../../assets/entry-seed.json';
 
-jest.mock('../db', () => ({
+jest.mock('../db', () => require('./helpers/mockDbModule').asDbModule({
   getMeta: jest.fn(), setMeta: jest.fn(), getEntryCount: jest.fn(),
   upsertIndexEntries: jest.fn(), cleanDenormalizedTitles: jest.fn(),
   getAllEntryTitles: jest.fn(), invalidateLinkCache: jest.fn(),

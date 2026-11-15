@@ -74,7 +74,7 @@ beforeEach(async () => {
     if (body === undefined) return { ok: false, json: async () => ({}) };
     return { ok: true, json: async () => body };
   });
-  m = require('../db');
+  m = require('./helpers/testDb').loadDb();
   db = await m.getDb();
   for (const [slug, title, prog] of [['kant', 'Kant', 0.5], ['hume', 'Hume', 0], ['leibniz', 'Leibniz', 0.95], ['epistemology', 'Epistemology', 0.2], ['orphan', 'Orphan', 0]] as const) {
     await db.runAsync('INSERT INTO entries (slug, title, read_progress) VALUES (?, ?, ?)', [slug, title, prog]);

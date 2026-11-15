@@ -7,14 +7,7 @@
 // zoteroHttp, mathPriority, prefetch, ...). Each use case in src/core takes the ports it needs
 // as a parameter; this file is where they meet.
 import { InteractionManager, Platform } from 'react-native';
-import {
-  getSyncFolder, exportUserData, importUserData, getArticleVersionDate,
-  getSlugsByCacheStatus, getCachedSlugs, getMeta, setMeta,
-  upsertIndexEntries, cacheArticle, getEntryCount, indexLinks, getAllEntryTitles, invalidateLinkCache,
-  cleanDenormalizedTitles, getEntryHtml, updateArticleHtml, setArticleAst,
-  getUncachedAstSlugs, setEntryNotes, getMathByHashes, putMathBatch, getLinksFrom,
-  type UserDataExport, type BookmarkRow,
-} from './services/db';
+import { createDb, type UserDataExport, type BookmarkRow } from './services/db';
 import type { Annotation, DownloadProgress, IndexEntry, LibraryScope } from './types';
 import type { UserDataStore } from './core/ports';
 import { exportUserDataToFolder, importUserDataFromFolder } from './core/syncUserData';
@@ -31,7 +24,7 @@ import { createSubstituteMath } from './core/substituteMath';
 import { backfillAst as backfillAstUseCase } from './core/backfills';
 import { ensureNotesCached as ensureNotesUseCase } from './core/ensureNotes';
 import { importSeed, type SeedPhase } from './core/seedImport';
-import { seedFiles, seedDatabase } from './services/seedImport';
+import { seedFiles, createSeedDatabase } from './services/seedImport';
 import { fetchIndexHtml, fetchArticleHtml, fetchNotesHtml } from './services/catalog';
 import { loadMathJaxScript } from './services/mathRender';
 import { createMathBridge } from './core/mathBridge';
@@ -48,7 +41,6 @@ import { COMMON_MATH, commonMathStamp } from './data/commonMath';
 import { perf } from './services/perf';
 export { perf };
 // UI stores and use cases (section "UI stores" below).
-import * as dbStore from './services/db';
 import type {
   AnnotationStore, AppPrefsStore, BookmarkStore, KeyValueStore, LibraryReadStore, ReaderStateStore,
 } from './core/ports';
@@ -62,12 +54,50 @@ import { createLinkifier } from './utils/linkifier';
 import { LINK_MAP_JSON } from './assets/linkMapData';
 import seedEntries from './assets/entry-seed.json';
 // Knowledge graph (graph/InPhO slice)
-import { getDb, getEntryPreview, getEntryHtml as getEntryHtmlForGraph } from './services/db';
 import { createGraph } from './core/graph';
 import { createGraphStore } from './services/graphDb';
+import { mergeAnnotation } from './core/annotationMerge';
+import { mergeRead } from './core/readsMerge';
+import { runMigrations, tableVersionStore, userVersionStore } from './core/migrations';
+import { CORE_MIGRATIONS } from './services/coreMigrations';
+import { secretsAvailable, getSecret, setSecret, deleteSecret } from './services/secureSecrets';
 import { inphoSource } from './services/inphoSource';
 
 declare const __DEV__: boolean | undefined;
+
+// ── The app database ─────────────────────────────────────────────────────────
+
+// Random 128-bit hex id; crypto.randomUUID is not guaranteed on Hermes.
+function newUid(): string {
+  let id = '';
+  for (let i = 0; i < 4; i++) id += Math.floor(Math.random() * 0x100000000).toString(16).padStart(8, '0');
+  return id;
+}
+
+// The one database instance: it holds the connection and the in-memory caches, and gets the core
+// pieces (migration runner, merge rules), the clock, the uid source and the secure store from here.
+// Everything that needs the connection (stores, the seed import, the graph tables) is built from it.
+const appDb = createDb({
+  migrate: async db => { await runMigrations(db, CORE_MIGRATIONS, userVersionStore); },
+  mergeAnnotation,
+  mergeRead,
+  clock: { now: () => Date.now() },
+  newUid,
+  secrets: { available: secretsAvailable, get: getSecret, set: setSecret, delete: deleteSecret },
+  loadBundledLinkMap: async () => (await import('./assets/linkMapData')).LINK_MAP_JSON,
+});
+const {
+  getSyncFolder, exportUserData, importUserData, getArticleVersionDate,
+  getSlugsByCacheStatus, getCachedSlugs, getMeta, setMeta,
+  upsertIndexEntries, cacheArticle, getEntryCount, indexLinks, getAllEntryTitles, invalidateLinkCache,
+  cleanDenormalizedTitles, getEntryHtml, updateArticleHtml, setArticleAst,
+  getUncachedAstSlugs, setEntryNotes, getMathByHashes, putMathBatch, getLinksFrom,
+  getDb, getEntryPreview,
+} = appDb;
+const dbStore = appDb;
+// The same instance, for the on-device test runner (src/tests/runTests.ts), which drives the real database.
+export { appDb };
+const getEntryHtmlForGraph = getEntryHtml;
 
 // The linkifier over the bundled link index. Parsing the index and compiling its regex is deferred
 // to the first article that is cached, not paid at startup.
@@ -447,7 +477,7 @@ export function importSeedFromUrl(url: string, onProgress: (p: SeedPhase) => voi
   return importSeed(
     {
       files: seedFiles,
-      db: seedDatabase,
+      db: createSeedDatabase(appDb),
       userData: dbUserData,
       meta: { setMeta },
       clock: { now: () => Date.now() },
@@ -464,7 +494,7 @@ export function importSeedFromUrl(url: string, onProgress: (p: SeedPhase) => voi
 // (which slugs this session already primed) lives in this instance.
 const graph = createGraph({
   source: inphoSource,
-  store: createGraphStore(getDb),
+  store: createGraphStore(getDb, { runMigrations, tableVersionStore }),
   meta: { getMeta, setMeta },
   clock: { now: () => Date.now() },
   sleep,

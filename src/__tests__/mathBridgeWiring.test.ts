@@ -17,7 +17,7 @@ jest.mock('expo-asset', () => ({
 }));
 jest.mock('expo-file-system', () => ({ readAsStringAsync: jest.fn(async () => 'QUJD') }));
 jest.mock('../assets/mathjax-full.b64', () => 1, { virtual: true });
-jest.mock('../services/db');
+jest.mock('../services/db', () => require('../services/__tests__/helpers/mockDbModule').asDbModule({ getMeta: jest.fn(), setMeta: jest.fn() }));
 
 /** Imports of a file as { from (repo-relative, no extension), names }; same resolution as compositionRoot.test. */
 function importsOf(file: string, text: string): Array<{ from: string; names: string[] }> {

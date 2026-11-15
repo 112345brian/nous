@@ -3,7 +3,9 @@
 // deferredMath.test.ts, which pins the main flow. Written BEFORE the state machine moved into
 // src/core/mathCompletion.ts and kept unchanged afterwards. db and the renderer are fakes.
 import { completeArticleMath, onMathReady, resumePendingMath, fetchAndCacheArticle } from '../../composition';   // wired in the composition root
-import * as db from '../db';
+import * as dbModule from '../db';
+import type { Db } from '../db';
+const db = dbModule as unknown as jest.Mocked<Db>;
 import { _resetMathCacheState } from '../../composition';   // the math runtime is built in the root
 import { parseSepHtml } from '../../utils/sepHtml/parse';
 
@@ -11,7 +13,7 @@ const mockMeta: Record<string, string> = {};
 const mockEntries: Record<string, string> = {};
 let mockMetaLag = false;
 
-jest.mock('../db', () => ({
+jest.mock('../db', () => require('./helpers/mockDbModule').asDbModule({
   getMeta: jest.fn(async (k: string) => { if (mockMetaLag) await new Promise<void>(r => setTimeout(r, 0)); return mockMeta[k] ?? null; }),
   setMeta: jest.fn(async (k: string, v: string) => { if (mockMetaLag) await new Promise<void>(r => setTimeout(r, 0)); mockMeta[k] = v; }),
   cacheArticle: jest.fn(async (slug: string, d: { content_html: string }) => { mockEntries[slug] = d.content_html; }),

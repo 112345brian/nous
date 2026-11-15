@@ -2,7 +2,9 @@
 // Written BEFORE the logic moved into src/core, and kept unchanged afterwards: these tests
 // are what proves the extraction preserved behaviour. File system, fetch and db are fakes.
 import { exportToSyncFolder, importFromSyncFolder, exportToZotero } from '../../composition';
-import * as db from '../db';
+import * as dbModule from '../db';
+import type { Db } from '../db';
+const db = dbModule as unknown as jest.Mocked<Db>;
 import type { Annotation } from '../../types';
 
 // ── in-memory file system standing in for expo-file-system ───────────────────
@@ -41,7 +43,7 @@ jest.mock('expo-file-system', () => {
   return { File, Directory, Paths: { cache: 'file:///cache/' } };
 });
 
-jest.mock('../db', () => ({
+jest.mock('../db', () => require('./helpers/mockDbModule').asDbModule({
   getSyncFolder: jest.fn(),
   exportUserData: jest.fn(),
   importUserData: jest.fn(),

@@ -3,7 +3,7 @@
 const mockSetArticleAst = jest.fn(async (_slug: string, _ast: string) => {});
 const mockHtml: Record<string, string | null> = {};
 
-jest.mock('../db', () => ({
+jest.mock('../db', () => require('./helpers/mockDbModule').asDbModule({
   getUncachedAstSlugs: async () => Object.keys(mockHtml),
   getEntryHtml: async (slug: string) => mockHtml[slug] ?? null,
   setArticleAst: (slug: string, ast: string) => mockSetArticleAst(slug, ast),

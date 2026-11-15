@@ -1,14 +1,16 @@
 import { Platform } from 'react-native';
 import { File, Paths } from 'expo-file-system';
-import {
+import { contentHash } from '../services/db';
+import { fetchAndCacheArticle, appDb } from '../composition';
+
+import { buildArticleHtml } from '../utils/articleTemplate';
+
+const {
   getEntryCount, getEntry, cacheArticle, searchEntries,
   saveAnnotation, getAnnotationsForSlug, deleteAnnotation,
   toggleBookmark, isBookmarked, getAllAnnotations,
   recordRead, getRecentSlugs, getMeta, setMeta,
-  contentHash,
-} from '../services/db';
-import { fetchAndCacheArticle } from '../composition';
-import { buildArticleHtml } from '../utils/articleTemplate';
+} = appDb;
 
 export interface TestResult {
   name: string;

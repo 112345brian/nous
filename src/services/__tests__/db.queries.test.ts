@@ -11,14 +11,14 @@ jest.mock('expo-sqlite', () => ({
   openDatabaseAsync: async () => mockCurrent,
 }));
 
-type DbModule = typeof import('../db');
+type DbModule = import('./helpers/testDb').TestDb;
 let m: DbModule;
 let raw: RealDb;
 
 beforeEach(async () => {
   jest.resetModules();
   raw = mockCurrent = createRealDb();
-  m = require('../db');
+  m = require('./helpers/testDb').loadDb();
   await m.getDb();
 });
 
@@ -257,7 +257,7 @@ describe('hot-query indexes', () => {
   it('re-running schema setup on an already-initialized, populated database is harmless', async () => {
     await addRead('s1', 'a', 100);
     jest.resetModules();
-    const m2: DbModule = require('../db'); // fresh module state, same underlying database
+    const m2: DbModule = require('./helpers/testDb').loadDb(); // fresh module state, same underlying database
     await expect(m2.getDb()).resolves.toBeDefined();
     expect((await m2.getSessions(30))).toHaveLength(1);
   });

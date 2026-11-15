@@ -20,7 +20,8 @@ jest.mock('expo-sqlite', () => {
   return { __esModule: true, openDatabaseAsync: async () => fakeDb };
 });
 
-import { getEntry, getEntryMeta, getEntryHtml } from '../db';
+import { loadDb } from './helpers/testDb';
+const { getEntry, getEntryMeta, getEntryHtml } = loadDb();
 
 const HEAVY = ['content_html', 'content_ast', 'notes_html'];
 const ENTRY_ROW_COLUMNS = [

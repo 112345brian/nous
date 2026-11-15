@@ -36,7 +36,7 @@ async function boot(meta: Record<string, string>) {
   for (const k of Object.keys(mockMeta)) delete mockMeta[k];
   Object.assign(mockMeta, meta, { migrated_clear_cache_v2: '1', ast_parser_version: '2' });
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const db = require('../db');
+  const db = require('./helpers/testDb').loadDb();
   await db.getDb();
 }
 

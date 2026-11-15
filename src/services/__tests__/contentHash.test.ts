@@ -15,7 +15,8 @@ jest.mock('expo-sqlite', () => {
   return { __esModule: true, openDatabaseAsync: async () => db, openDatabaseSync: () => db };
 });
 
-import { cacheArticle, contentHash, resolveEntryHash } from '../db';
+import { loadDb } from './helpers/testDb';
+const { cacheArticle, contentHash, resolveEntryHash } = loadDb();
 
 beforeEach(() => {
   mockRun.mockClear();

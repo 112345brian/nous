@@ -10,14 +10,14 @@
 // and cached locally, never bundled. See services/inphoSource.ts / NOTICE.md.
 
 import type * as SQLite from 'expo-sqlite';
-import { runMigrations, tableVersionStore, type Migration } from './migrations';
+import type { Migration, runMigrations as RunMigrations, tableVersionStore as TableVersionStore } from '../core/migrations';
 import type { GraphEdge, InphoNodeRow } from '../types';
 import type { GraphStore, GraphEntryRow, RelationsRow, LayoutRow } from '../core/ports';
 
 // ── Schema (owned here, created on first use) ────────────────────────────────
 
 // Schema version lives in the shared schema_versions table under this scope
-// (the core schema owns PRAGMA user_version). See services/migrations.ts.
+// (the core schema owns PRAGMA user_version). See core/migrations.ts.
 const GRAPH_MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
@@ -65,7 +65,14 @@ const GRAPH_MIGRATIONS: readonly Migration[] = [
 
 const inList = (n: number) => Array.from({ length: n }, () => '?').join(',');
 
-export function createGraphStore(getDb: () => Promise<SQLite.SQLiteDatabase>): GraphStore {
+// The migration runner is core code, so the root passes it in rather than this adapter importing it.
+export interface GraphMigrator {
+  runMigrations: typeof RunMigrations;
+  tableVersionStore: typeof TableVersionStore;
+}
+
+export function createGraphStore(getDb: () => Promise<SQLite.SQLiteDatabase>, migrator: GraphMigrator): GraphStore {
+  const { runMigrations, tableVersionStore } = migrator;
   // Keyed by connection handle: when the database is closed and reopened (e.g. the file was
   // replaced by a seed import) the new handle must be checked again, or the tables would be
   // missing from the new file.

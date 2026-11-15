@@ -4,7 +4,7 @@
 const mockMeta: Record<string, string> = {};
 const mockEntries: Record<string, { content_html: string }> = {};
 
-jest.mock('../db', () => ({
+jest.mock('../db', () => require('./helpers/mockDbModule').asDbModule({
   upsertIndexEntries: jest.fn(),
   cacheArticle: jest.fn(async (slug: string, d: { content_html: string }) => { mockEntries[slug] = { content_html: d.content_html }; }),
   getMeta: jest.fn(async (k: string) => mockMeta[k] ?? null),

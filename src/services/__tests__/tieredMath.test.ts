@@ -4,7 +4,7 @@
 const mockMeta: Record<string, string> = {};
 const mockEntries: Record<string, { content_html: string }> = {};
 
-jest.mock('../db', () => ({
+jest.mock('../db', () => require('./helpers/mockDbModule').asDbModule({
   upsertIndexEntries: jest.fn(),
   cacheArticle: jest.fn(async (slug: string, d: { content_html: string }) => {
     mockEntries[slug] = { content_html: d.content_html };
@@ -34,7 +34,9 @@ jest.mock('../db', () => ({
 const mockRender = jest.fn();
 jest.mock('../../core/mathBridge', () => ({ createMathBridge: () => require('./fakeMathBridge').fakeMathBridge((...a: unknown[]) => mockRender(...a)) }));
 
-import * as db from '../db';
+import * as dbModule from '../db';
+import type { Db } from '../db';
+const db = dbModule as unknown as jest.Mocked<Db>;
 import { completeArticleMath } from '../../composition';   // wired in the composition root
 import { partitionAnnotations } from '../../utils/annotationValidity';
 import { reanchorAll } from '../../utils/reanchor';

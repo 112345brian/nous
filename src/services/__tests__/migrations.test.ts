@@ -1,4 +1,4 @@
-// The versioned-migration runner (services/migrations.ts), against real SQLite.
+// The versioned-migration runner (core/migrations.ts), against real SQLite.
 
 
 export {};
@@ -13,7 +13,7 @@ beforeEach(async () => {
   jest.resetModules();
   fake = require('./helpers/fakeExpoSqlite');
   fake.reset();
-  m = require('../migrations');
+  m = require('../../core/migrations');
   db = await fake.module.openDatabaseAsync('test.db');
 });
 

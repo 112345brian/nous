@@ -8,7 +8,7 @@ let mockPutFailAt = 0;      // 1-based putMathBatch call number that "kills the 
 let mockPutCalls = 0;
 let mockUpdateFail = false; // updateArticleHtml "kills the app" once
 
-jest.mock('../db', () => ({
+jest.mock('../db', () => require('./helpers/mockDbModule').asDbModule({
   getMeta: jest.fn(async (k: string) => mockMeta[k] ?? null),
   setMeta: jest.fn(async (k: string, v: string) => { mockMeta[k] = v; }),
   getEntryHtml: jest.fn(async (s: string) => mockEntries[s]?.content_html ?? null),

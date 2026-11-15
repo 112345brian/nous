@@ -6,7 +6,7 @@ export {};
 const mockNet = { isConnected: true, isInternetReachable: true, details: { isConnectionExpensive: false } as any };
 const mockLinks: Array<{ slug: string; cached_at: number | null }> = [];
 jest.mock('@react-native-community/netinfo', () => ({ __esModule: true, default: { fetch: async () => mockNet } }));
-jest.mock('../db', () => ({ getLinksFrom: async () => mockLinks }));
+jest.mock('../db', () => require('./helpers/mockDbModule').asDbModule({ getLinksFrom: async () => mockLinks }));
 
 describe('prefetch (core use case + platform adapters)', () => {
   beforeEach(() => {

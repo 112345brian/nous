@@ -15,8 +15,8 @@ beforeEach(() => {
   jest.resetModules();
   fake = require('./helpers/fakeExpoSqlite');
   fake.reset();
-  db = require('../db');
-  const store = require('../graphDb').createGraphStore(db.getDb);
+  db = require('./helpers/testDb').loadDb();
+  const store = require('../graphDb').createGraphStore(db.getDb, require('../../core/migrations'));
   graph = { inphoIndexCount: () => store.indexCount() };
 });
 

@@ -2,11 +2,13 @@
 // pinned in deferredMath.test.ts). Written BEFORE the logic moved into src/core and kept
 // unchanged afterwards. db, the renderer and fetch are fakes.
 import { fetchAndCacheArticle } from '../../composition';   // wired in the composition root
-import * as db from '../db';
+import * as dbModule from '../db';
+import type { Db } from '../db';
+const db = dbModule as unknown as jest.Mocked<Db>;
 import { _resetMathCacheState } from '../../composition';   // the math runtime is built in the root
 import { parseSepHtml } from '../../utils/sepHtml/parse';
 
-jest.mock('../db', () => ({
+jest.mock('../db', () => require('./helpers/mockDbModule').asDbModule({
   cacheArticle: jest.fn(async () => {}),
   indexLinks: jest.fn(async () => {}),
   getMeta: jest.fn(async () => null),

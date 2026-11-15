@@ -14,7 +14,7 @@ import {
   makeDirectoryAsync,
   moveAsync,
 } from 'expo-file-system/legacy';
-import { closeDb, getDb } from './db';
+import type { SQLiteDatabase } from 'expo-sqlite';
 import type { SeedDatabase, SeedFiles } from '../core/ports';
 
 const DB_DIR = `${documentDirectory}SQLite/`;
@@ -49,7 +49,12 @@ export const seedFiles: SeedFiles = {
   backupLocation: BACKUP_PATH,
 };
 
-export const seedDatabase: SeedDatabase = {
+// The connection comes from the caller (the composition root passes the one Db instance's handles).
+export function createSeedDatabase({ getDb, closeDb }: {
+  getDb: () => Promise<SQLiteDatabase>;
+  closeDb: () => Promise<void>;
+}): SeedDatabase {
+  return {
   close: closeDb,
   async listMeta() {
     const db = await getDb();
@@ -72,4 +77,5 @@ export const seedDatabase: SeedDatabase = {
       }
     });
   },
-};
+  };
+}

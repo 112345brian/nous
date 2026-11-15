@@ -3,11 +3,13 @@
 // path changed when the wiring moved to the composition root). They run the real article
 // pipeline; db, fetch, the renderer and the clock are fakes.
 import { downloadAll, syncCachedArticles } from '../../composition';
-import * as db from '../db';
+import * as dbModule from '../db';
+import type { Db } from '../db';
+const db = dbModule as unknown as jest.Mocked<Db>;
 import { _resetMathCacheState } from '../../composition';   // the math runtime is built in the root
 
 const mockMeta: Record<string, string> = {};
-jest.mock('../db', () => ({
+jest.mock('../db', () => require('./helpers/mockDbModule').asDbModule({
   getSlugsByCacheStatus: jest.fn(),
   getCachedSlugs: jest.fn(),
   getMeta: jest.fn(async (k: string) => mockMeta[k] ?? null),

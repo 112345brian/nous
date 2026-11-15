@@ -18,7 +18,7 @@ beforeEach(() => {
   jest.resetModules();
   fake = require('./helpers/fakeExpoSqlite');
   fake.reset();
-  db = require('../db');
+  db = require('./helpers/testDb').loadDb();
 });
 
 const tables = (r: any): string[] =>
@@ -64,7 +64,7 @@ describe('fresh install', () => {
 
 describe('later schema steps', () => {
   it('applies a step appended after version 1 to a database already at version 1', async () => {
-    const { runMigrations, userVersionStore } = require('../migrations');
+    const { runMigrations, userVersionStore } = require('../../core/migrations');
     const { CORE_MIGRATIONS } = require('../coreMigrations');
     await db.getDb();
     await db.closeDb();

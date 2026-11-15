@@ -53,9 +53,9 @@ jest.mock('expo-sqlite', () => {
   return { __esModule: true, openDatabaseAsync: async () => fakeDb };
 });
 
-function freshDb(): typeof import('../db') {
+function freshDb(): import('./helpers/testDb').TestDb {
   jest.resetModules();
-  return require('../db');
+  return require('./helpers/testDb').loadDb();
 }
 
 // __mocks__/expo-secure-store.js (in-memory, with test controls). Re-required
@@ -133,7 +133,7 @@ describe('Zotero API key in secure storage', () => {
     jest.resetModules();
     jest.doMock('expo-secure-store', () => { throw new Error('Cannot find native module ExpoSecureStore'); });
     try {
-      const db = require('../db');
+      const db = require('./helpers/testDb').loadDb();
       await db.saveZoteroPrefs('KEY123', '42');
       expect(mockMeta.get('zotero_api_key')).toBe('KEY123');
       expect(await db.getZoteroPrefs()).toEqual({ apiKey: 'KEY123', userId: '42' });

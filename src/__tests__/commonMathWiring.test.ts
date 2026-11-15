@@ -3,7 +3,7 @@ declare const __dirname: string;
 const fs = require('fs');
 const path = require('path');
 
-jest.mock('../services/db', () => ({ getMeta: jest.fn(), setMeta: jest.fn() }));
+jest.mock('../services/db', () => require('../services/__tests__/helpers/mockDbModule').asDbModule({ getMeta: jest.fn(), setMeta: jest.fn() }));
 
 import { scheduleCommonMathPrewarm, realPrewarmDeps } from '../composition';
 
