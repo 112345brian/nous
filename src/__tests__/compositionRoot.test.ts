@@ -78,7 +78,7 @@ const WIRING_EXCEPTIONS: Array<{ file: string; reason: string }> = [];
 // annotationStore, libraryRead, appPrefs, metaStore) and the UI use cases from the root. Only the
 // graph screen is left; the graph session owns it. When it moves, this list is empty and stays so.
 const DB_DIRECT_ALLOWLIST = [
-  'src/screens/GraphScreen.tsx',
+  'src/screens/GraphScreen.tsx', // owned by the graph session (core-graph); remove when it moves
 ];
 
 // What the root exports for the UI (stores and the use cases built over them).

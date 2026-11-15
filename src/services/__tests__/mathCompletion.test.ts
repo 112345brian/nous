@@ -23,7 +23,7 @@ jest.mock('../db', () => ({
   getMathByHashes: jest.fn(async () => []),
 }));
 const mockRender = jest.fn();
-jest.mock('../mathRender', () => ({ renderMathBatch: (...a: unknown[]) => mockRender(...a) }));
+jest.mock('../../core/mathBridge', () => ({ createMathBridge: () => require('./fakeMathBridge').fakeMathBridge((...a: unknown[]) => mockRender(...a)) }));
 jest.mock('../perf', () => ({ perf: { enabled: false, begin() {}, end() {}, mark() {}, time: (_k: string, _s: string, fn: () => unknown) => fn(), timeSync: (_k: string, _s: string, fn: () => unknown) => fn() } }));
 
 const m = db as jest.Mocked<typeof db>;

@@ -24,10 +24,10 @@ jest.mock('../src/composition', () => {
     readerState: { getRecentSlugs: jest.fn() },
     libraryRead: { getEntryCount: jest.fn() },
     runAutoDeepSync: jest.fn(),
+    preloadMathJax: jest.fn(),
     scheduleCommonMathPrewarm: jest.fn(() => idleScheduler.schedule('prewarm-common-math', jest.fn())),
   };
 });
-jest.mock('../src/services/mathRender', () => ({ preloadMathJax: jest.fn() }));
 jest.mock('../src/services/downloadNotification', () => ({
   startDownloadNotification: jest.fn().mockResolvedValue(undefined),
   updateDownloadNotification: jest.fn().mockResolvedValue(undefined),

@@ -33,7 +33,9 @@ import { ensureNotesCached as ensureNotesUseCase } from './core/ensureNotes';
 import { importSeed, type SeedPhase } from './core/seedImport';
 import { seedFiles, seedDatabase } from './services/seedImport';
 import { fetchIndexHtml, fetchArticleHtml, fetchNotesHtml } from './services/catalog';
-import { renderMathBatch } from './services/mathRender';
+import { loadMathJaxScript } from './services/mathRender';
+import { createMathBridge } from './core/mathBridge';
+import type { MathRenderer } from './core/ports';
 import { watchStalls, highResNow } from './services/stallWatch';
 import { expoSyncFolder } from './services/expoSyncFolder';
 import { zoteroHttp } from './services/zoteroHttp';
@@ -81,8 +83,39 @@ export const idleScheduler = createIdleScheduler({
 const pacing = createMathPacing({ scheduler: idleScheduler, setTimer, now: highResNow });
 export const { withDownloadHold, whenMathMayRun, yieldThenMathMayRun } = pacing;
 
+// ── Math render bridge ───────────────────────────────────────────────────────
+
+// The one WebView bridge instance. The core reaches it only as the `MathRenderer` port;
+// components/MathRenderWebView registers into it through `mathWebViewHost`. Timers are real here.
+const mathBridge = createMathBridge({
+  loadEngineScript: loadMathJaxScript,
+  setTimer,
+  clearTimer: h => clearTimeout(h as ReturnType<typeof setTimeout>),
+});
+
+// The Hermes spike (services/mathRenderHermes.ts) is a second `MathRenderer`, chosen here by the
+// build-time flag, not a branch inside the bridge. It is required lazily, inside the flagged
+// branch, so its MathJax-in-Hermes code is never evaluated (and a release build can drop it)
+// unless EXPO_PUBLIC_MATH_HERMES=1. With the flag on there is no WebView engine to load, so
+// preloadMathJax is a no-op. See docs/mathjax-hermes-spike.md.
+const useHermesMath = process.env.EXPO_PUBLIC_MATH_HERMES === '1';
+const mathRenderer: MathRenderer = useHermesMath
+  ? { render: items => require('./services/mathRenderHermes').renderMathBatchHermes(items) }
+  : mathBridge;
+
+/** What the hidden MathRenderWebView calls into; nothing else should. */
+export const mathWebViewHost = {
+  attach: mathBridge.attach,
+  onMessage: mathBridge.onMessage,
+  onDomReady: mathBridge.onDomReady,
+  reset: mathBridge.reset,
+};
+/** Load MathJax into the WebView now (boot does this only when equations are waiting). Idempotent. */
+export const preloadMathJax = (): Promise<void> => (useHermesMath ? Promise.resolve() : mathBridge.preload());
+export const isMathWebViewReady = mathBridge.isAttached;
+
 const renderChunked = createChunkedRenderer({
-  render: renderMathBatch,
+  render: mathRenderer.render,
   firstGate: pacing.whenMathMayRun,
   nextGate: pacing.yieldThenMathMayRun,
   macrotask: () => pacing.macrotask(),
