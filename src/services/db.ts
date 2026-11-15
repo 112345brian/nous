@@ -2,6 +2,7 @@ import * as SQLite from 'expo-sqlite';
 import type { EntryRow, EntrySummary, ReadRow, ReadNode, Session, Annotation } from '../types';
 import { makeExcerpt } from '../utils/excerpt';
 import { mergeAnnotation, newUid } from './annotationMerge';
+import { mergeRead, READS_DEDUPE_SQL, READS_UNIQUE_INDEX_SQL } from './readsMerge';
 
 let _db: SQLite.SQLiteDatabase | null = null;
 
@@ -136,6 +137,10 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     await db.runAsync('UPDATE annotations SET uid = ? WHERE id = ?', [newUid(), r.id]);
   }
   await db.runAsync('CREATE UNIQUE INDEX IF NOT EXISTS idx_annotations_uid ON annotations(uid)');
+
+  // Earlier imports duplicated reads; collapse them, then make duplicates impossible.
+  await db.runAsync(READS_DEDUPE_SQL);
+  await db.runAsync(READS_UNIQUE_INDEX_SQL);
 
   // One-time migration: clear articles cached before preamble_html column existed
   // so they re-fetch with the corrected parser (title/preamble no longer embedded in content_html).
@@ -412,7 +417,7 @@ export async function recordRead(
       : String(now);
 
   await db.runAsync(
-    `INSERT INTO reads (slug, title, visited_at, from_slug, session_id)
+    `INSERT OR IGNORE INTO reads (slug, title, visited_at, from_slug, session_id)
      VALUES (?, ?, ?, ?, ?)`,
     [slug, title, now, fromSlug ?? null, sessionId]
   );
@@ -929,13 +934,9 @@ export async function exportUserData(): Promise<UserDataExport> {
 export async function importUserData(data: UserDataExport): Promise<void> {
   const db = await getDb();
   await db.withTransactionAsync(async () => {
-    // Reads: insert-or-ignore by (slug, visited_at) to avoid dupes
-    for (const r of data.reads) {
-      await db.runAsync(
-        `INSERT OR IGNORE INTO reads (slug, title, visited_at, from_slug, session_id)
-         VALUES (?, ?, ?, ?, ?)`,
-        [r.slug, r.title, r.visited_at, r.from_slug ?? null, r.session_id]
-      );
+    // Reads: identity is (slug, visited_at, session_id); see readsMerge.ts.
+    for (const r of data.reads ?? []) {
+      await mergeRead(db, r);
     }
     // Bookmarks: upsert by slug, keep newest saved_at
     for (const b of data.bookmarks) {
