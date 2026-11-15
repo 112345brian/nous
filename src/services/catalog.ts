@@ -1,28 +1,17 @@
 import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getSlugsByCacheStatus, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, getMathArticleHtml, updateArticleHtml, setArticleAst, getUncachedAstSlugs, getEntryHtml, putMath, putMathBatch, getMathSvgMap, setEntryNotes } from './db';
 import { linkifyHtml } from '../utils/linkifier';
 import seedEntries from '../assets/entry-seed.json';
-import { renderMathBatch } from './mathRender';
+import { ensureMath } from './mathCache';
+import { mathHash, hash64 } from '../utils/mathKey';
+import { mathSlice, watchStalls, yieldThenMathMayRun, withDownloadHold, MathPriority } from './mathPriority';
 import { parseSepHtml } from '../utils/sepHtml/parse';
 import { perf } from '../utils/perf';
 import { classifySimpleTex, TIERED_MATH_DEFAULT } from '../utils/mathTier';
 
-// 64-bit hash of a TeX equation (or SVG bytes) + display flag. Two independent
-// djb2-xor passes with different seeds; birthday collision at ~2^32 unique inputs
-// vs. the ~65k bound of a 32-bit hash, making collisions essentially impossible
-// across the SEP corpus. Existing 8-char hashes (32-bit) in the DB remain valid.
-function mathHash(input: string, display: boolean): string {
-  let h1 = 5381, h2 = 52711;
-  const s = input + (display ? '\x01' : '\x00');
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    h1 = (((h1 << 5) + h1) ^ c) >>> 0;
-    h2 = (((h2 << 5) + h2) ^ c) >>> 0;
-  }
-  return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
-}
-
 // Replace all \(…\) and \[…\] TeX math in the raw HTML with compact <math-i>
-// placeholder elements. SVGs are stored in the `math` DB table by hash so
+// placeholder elements. `priority` null = the caller already owns the schedule (the
+// syncCachedArticles awaitMath path runs under its own 'download' hold, so gating on
+// it would wait forever); chunks and slices then only yield a macrotask. SVGs are stored in the `math` DB table by hash so
 // content_html stays small — no inlined base64, no multi-MB HTML.
 const MATH_SUBST_RE = /\\\(([\s\S]*?)\\\)|\\\[([\s\S]*?)\\\]/g;
 // Tiered math flag. Default OFF until verified on a device. Enable by setting the
@@ -38,7 +27,7 @@ async function tieredMathEnabled(): Promise<boolean> {
   } catch { /* fall through to default */ }
   return TIERED_MATH_DEFAULT;
 }
-async function substitutemath(html: string): Promise<string> {
+async function substitutemath(html: string, priority: MathPriority | null = 'current'): Promise<string> {
   const spots: Array<{ index: number; len: number; tex: string; display: boolean }> = [];
   MATH_SUBST_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
@@ -54,46 +43,41 @@ async function substitutemath(html: string): Promise<string> {
   }
   if (!spots.length) return html;
 
-  // Tiering (flag-gated): trivially simple TeX becomes styled text in the line;
-  // only the remainder is typeset by MathJax. Fail closed — null means MathJax.
+  // Tiering (flag-gated): trivially simple TeX becomes styled text in the line; only
+  // the remainder is typeset by MathJax. Fail closed: null means MathJax.
   const tiered = (await tieredMathEnabled())
     ? spots.map(s => classifySimpleTex(s.tex, s.display))
     : spots.map(() => null);
-  const mjIdx: number[] = [];
-  for (let i = 0; i < spots.length; i++) if (tiered[i] === null) mjIdx.push(i);
-  const mjResults = mjIdx.length
-    ? await renderMathBatch(mjIdx.map(i => ({ tex: spots[i].tex, display: spots[i].display })))
-    : [];
-  const results: Array<(typeof mjResults)[number] | undefined> = new Array(spots.length);
-  mjIdx.forEach((i, k) => { results[i] = mjResults[k]; });
+  const mjSpots = spots
+    .filter((_, i) => tiered[i] === null)
+    .map(s => ({ tex: s.tex, display: s.display }));
+
+  // Dedupe, look up what the math table already holds, render only the missing
+  // unique equations (each chunk stored before the next is requested). If any
+  // equation is still missing (renderer timed out), leave the article untouched
+  // and pending; rewriting is the idempotent last step and needs no rendering.
+  const { dims, complete } = mjSpots.length
+    ? await ensureMath(mjSpots, priority)
+    : { dims: new Map<string, { w: number; h: number }>(), complete: true };
+  if (!complete) return html;
+  const slice = mathSlice(priority);
 
   let out = html;
-  const rows: Array<{ hash: string; svg: string; w: number; h: number; display: boolean }> = [];
   for (let i = spots.length - 1; i >= 0; i--) {
+    await slice.checkpoint(); // yield the JS thread when this slice's time budget is spent
     const { index, len, display, tex } = spots[i];
     const text = tiered[i];
     if (text !== null) {
       out = out.slice(0, index) + text + out.slice(index + len);
       continue;
     }
-    const r = results[i];
-    if (!r || r.error || !r.b64) continue;
     const hash = mathHash(tex, display);
-    const w = (r.w ?? 1).toFixed(4);
-    const h = (r.h ?? 1).toFixed(4);
-    rows.push({ hash, svg: atob(r.b64), w: r.w ?? 1, h: r.h ?? 1, display });
+    const d = dims.get(hash);
+    if (!d) continue; // unrenderable TeX stays as raw text
     // Tiny placeholder — no base64 in HTML.
-    const tag = `<math-i hash="${hash}" d="${display ? '1' : '0'}" w="${w}" h="${h}"></math-i>`;
+    const tag = `<math-i hash="${hash}" d="${display ? '1' : '0'}" w="${d.w.toFixed(4)}" h="${d.h.toFixed(4)}"></math-i>`;
     out = out.slice(0, index) + tag + out.slice(index + len);
   }
-  // The renderer produced nothing for the MathJax remainder (timeout): report
-  // "nothing converted" so the caller keeps the article pending, exactly as
-  // before tiering — never mark done with raw TeX left behind.
-  if (mjIdx.length && !rows.length) return html;
-  // Store SVGs in the math table in one transaction (idempotent on hash). Done
-  // before the caller writes the substituted HTML, so no placeholder can ever
-  // reference a missing row.
-  await putMathBatch(rows);
   return out;
 }
 
@@ -134,14 +118,15 @@ const mathInFlight = new Map<string, Promise<boolean>>();
 // `html` may be passed when the caller already holds it (skips a DB read).
 // Resolves true when the article no longer needs math work; false when the
 // renderer made no progress (it stays pending and is retried at next launch).
-export function completeArticleMath(slug: string, html?: string): Promise<boolean> {
+export function completeArticleMath(slug: string, html?: string, priority: MathPriority = 'current'): Promise<boolean> {
   const existing = mathInFlight.get(slug);
   if (existing) return existing;
+  const stopWatch = watchStalls(`math:${slug}`); // dev-only; no-op in release
   const p = (async () => {
     try {
       const src = html ?? (await getEntryHtml(slug));
       if (!src) return false;
-      const updated = await substitutemath(src);
+      const updated = await substitutemath(src, priority);
       if (updated === src) {
         // Nothing converted. Fine if there was no TeX; otherwise the renderer
         // timed out — keep it pending.
@@ -158,6 +143,7 @@ export function completeArticleMath(slug: string, html?: string): Promise<boolea
       return false;
     } finally {
       mathInFlight.delete(slug);
+      stopWatch();
     }
   })();
   mathInFlight.set(slug, p);
@@ -175,8 +161,9 @@ export async function resumePendingMath(): Promise<void> {
     return;
   }
   for (const slug of slugs) {
-    await new Promise<void>(r => setTimeout(r, 32));
-    await completeArticleMath(slug);
+    // One article per unit; stops here (slug stays in math_pending) while the reader is active.
+    await yieldThenMathMayRun('background');
+    await completeArticleMath(slug, undefined, 'background');
   }
 }
 
@@ -208,7 +195,7 @@ export async function backfillMathHashFormat(): Promise<void> {
           const h = parseFloat(hMatch?.[1] ?? '1') || 1;
           // Hash SVG content (TeX unavailable here). Uses the same 64-bit djb2
           // as mathHash so the key space matches newly-fetched articles.
-          const hash = mathHash(svg, display);
+          const hash = hash64(svg, display);
           puts.push(putMath(hash, svg, w, h, display));
           changed = true;
           return `<math-i hash="${hash}" d="${display ? '1' : '0'}" w="${w.toFixed(4)}" h="${h.toFixed(4)}"></math-i>`;
@@ -235,10 +222,13 @@ export async function backfillMathInline(): Promise<void> {
   if (done) return;
   const articles = await getMathArticleHtml();
   for (const article of articles) {
-    await new Promise<void>(r => setTimeout(r, 0));
+    await yieldThenMathMayRun('background');
     try {
-      const updated = await substitutemath(article.content_html);
-      if (updated !== article.content_html) {
+      // Re-read: the snapshot above may be hours old if we were paused, and a
+      // reader-triggered completion may have rewritten this article since.
+      const current = (await getEntryHtml(article.slug)) ?? article.content_html;
+      const updated = await substitutemath(current, 'background');
+      if (updated !== current) {
         await updateArticleHtml(article.slug, updated);
       }
     } catch {
@@ -253,9 +243,9 @@ export async function backfillMathInline(): Promise<void> {
 export async function backfillAst(): Promise<void> {
   const slugs = await getUncachedAstSlugs();
   for (const slug of slugs) {
-    // Yield one animation frame between parses so background AST generation
-    // doesn't monopolize the JS thread and drop frames while the user is active.
-    await new Promise<void>(r => setTimeout(r, 32));
+    // One article per unit: yield a macrotask, and stop while the reader is
+    // active or a download is running (the work list is re-derived from the DB).
+    await yieldThenMathMayRun('background');
     try {
       const html = await getEntryHtml(slug);
       if (!html) continue;
@@ -319,10 +309,18 @@ export type DownloadProgress = {
   current: string;
 };
 
-export async function downloadAll(
+export function downloadAll(
   onProgress: (p: DownloadProgress) => void,
   signal?: AbortSignal,
   scope: 'all' | 'sep' | 'owl' = 'all'
+): Promise<void> {
+  return withDownloadHold(() => downloadAllUnheld(onProgress, signal, scope));
+}
+
+async function downloadAllUnheld(
+  onProgress: (p: DownloadProgress) => void,
+  signal: AbortSignal | undefined,
+  scope: 'all' | 'sep' | 'owl'
 ): Promise<void> {
   const { uncached, cached } = await getSlugsByCacheStatus(scope);
   // Report progress against the full library so a resumed download shows
@@ -355,9 +353,16 @@ export async function downloadAll(
   }
 }
 
-export async function syncCachedArticles(
+export function syncCachedArticles(
   onProgress: (p: DownloadProgress) => void,
   signal?: AbortSignal
+): Promise<void> {
+  return withDownloadHold(() => syncCachedArticlesUnheld(onProgress, signal));
+}
+
+async function syncCachedArticlesUnheld(
+  onProgress: (p: DownloadProgress) => void,
+  signal: AbortSignal | undefined
 ): Promise<void> {
   await refreshIndexIfStale();
   const slugs = await getCachedSlugs();
@@ -416,7 +421,7 @@ export async function fetchAndCacheArticle(
     const hasMath = linkedHtml.includes('\\(') || linkedHtml.includes('\\[');
     // Substitute math unless caller opted out (bulk download defers to backfillMathInline).
     const deferMath = hasMath && !opts.skipMath && !opts.awaitMath;
-    const finalHtml = hasMath && !opts.skipMath && opts.awaitMath ? await perf.time(slug, 'math', () => substitutemath(linkedHtml)) : linkedHtml;
+    const finalHtml = hasMath && !opts.skipMath && opts.awaitMath ? await perf.time(slug, 'math', () => substitutemath(linkedHtml, null)) : linkedHtml;
     // Footnote text lives on a sibling notes.html page; fetch it so footnotes
     // resolve offline. Only when the body actually references it.
     const notesHtml = /notes\.html#note/i.test(finalHtml) ? await perf.time(slug, 'notes', () => fetchNotesHtml(slug)) : null;

@@ -17,6 +17,7 @@ import type { SeedPhase } from './src/services/seedImport';
 import { backfillAst, backfillMathHashFormat, backfillMathInline, downloadAll, refreshIndexIfStale, syncCachedArticles } from './src/services/catalog';
 import { preloadMathJax } from './src/services/mathRender';
 import { idleScheduler } from './src/services/idleScheduler';
+import { withDownloadHold } from './src/services/mathPriority';
 import type { Prefs } from './src/services/db';
 import { IS_TEST_BUILD } from './src/testConfig';
 import MathRenderWebView from './src/components/MathRenderWebView';
@@ -217,7 +218,7 @@ function AppInner() {
     if (prefs.seedUrl) {
       setPhase('seeding');
       try {
-        await importSeedFromUrl(prefs.seedUrl, p => setSeedPhase(p));
+        await withDownloadHold(() => importSeedFromUrl(prefs.seedUrl, p => setSeedPhase(p)));
       } catch {
         setPhase('seed_error');
         return;

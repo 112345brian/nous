@@ -28,6 +28,7 @@ jest.mock('../db', () => ({
   getEntryHtml: jest.fn(async (slug: string) => mockEntries[slug]?.content_html ?? null),
   putMathBatch: jest.fn(async () => {}),
   getMathSvgMap: jest.fn(async () => ({})),
+  getMathByHashes: jest.fn(async () => []),
   setEntryNotes: jest.fn(),
 }));
 
@@ -74,7 +75,9 @@ describe('flag ON (meta tiered_math=1)', () => {
     expect(mockRender).not.toHaveBeenCalled();
     expect(out).toBe(page(`Let <em>x</em>₁ and <em>p</em>${T}→${T}<em>q</em>.`));
     expect(out).not.toContain('<math-i');
-    expect(db.putMathBatch).toHaveBeenCalledWith([]);
+    // Nothing is left for MathJax, so the math table is never consulted or written.
+    expect(db.putMathBatch).not.toHaveBeenCalled();
+    expect(db.getMathByHashes).not.toHaveBeenCalled();
     expect(db.setArticleAst).toHaveBeenCalled();
   });
 

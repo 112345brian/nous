@@ -293,13 +293,19 @@ export default function ArticleScreen() {
   // reader keeps their place and state.entry (and its content hash) is untouched.
   useEffect(() => {
     if (!USE_NATIVE_RENDERER) return;
-    return onMathReady(async (readySlug) => {
+    let stale = false;
+    const off = onMathReady(async (readySlug) => {
       if (readySlug !== slug) return;
       try {
+        // Don't JSON.parse + re-render the whole article under the reader's finger:
+        // wait for a quiet gap (and for any article open/download hold to end).
+        await idleScheduler.whenMayRun('current');
+        if (stale) return; // navigated away while waiting
         const e = await getEntry(slug);
-        if (e?.content_ast) setNativeArticle(JSON.parse(e.content_ast));
+        if (!stale && e?.content_ast) setNativeArticle(JSON.parse(e.content_ast));
       } catch { /* keep showing the text-only version */ }
     });
+    return () => { stale = true; off(); };
   }, [slug]);
 
   // Resolve footnote text from notes.html. Uses the stored notes_html when
