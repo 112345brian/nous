@@ -130,6 +130,8 @@ them over. Screens and `src/boot` import the wired use cases from `composition.t
 | `NotesStore` (`setEntryNotes`) | C4 | `services/db.ts` |
 | `ArticleMathStore` (read and rewrite an article's body, store its AST) | C6 | `services/db.ts` |
 | `ArticleMath` (`substitute`: render now; `completeLater`: render in the background; `queueForLater`: record the debt only) | C1, C6, G1, G2 | `services/catalog.ts` (`substitutemath`) plus the pipeline in `core/mathCompletion.ts` |
+| `MathRenderer` (`render`: typeset equations, one result per request) | C1, C6 | `services/mathRender.ts` (hidden MathJax WebView; flagged Hermes spike in `mathRenderHermes.ts`) |
+| `MathStore` (`getMathByHashes`, `putMathBatch`: the equation table) | C6 | `services/db.ts` |
 | `LibraryCacheStatus` (cached and uncached entries) | G1, G2 | `services/db.ts` |
 | `LibraryBackfillStore` (articles with no AST) | A4 | `services/db.ts` |
 | `KeyValueStore` (`getMeta`, `setMeta`: stamps, flags, the pending-math list) | A3, A4, C6, G2 | `services/db.ts` (`meta` table) |
@@ -137,13 +139,14 @@ them over. Screens and `src/boot` import the wired use cases from `composition.t
 | `ZoteroHttp` (`post`) | E4 | `services/zoteroHttp.ts` (`fetch`) |
 | `StageTimer` (dev-only stage timing) | C1 | `services/perf.ts` |
 | `Clock`, `Sleep` | A3, E4, G1, G2 | `Date.now` and a timer, supplied by the root |
-| the pre-warm's own deps (`PrewarmDeps`, in `core/prewarmCommonMath.ts`) | A4 (common equations) | the root, from `mathCache.ensureMath` at background priority, the `meta` table and the idle scheduler |
+| the pre-warm's own deps (`PrewarmDeps`, in `core/prewarmCommonMath.ts`) | A4 (common equations) | the root, from `ensureMath` at background priority, the `meta` table and the idle scheduler |
 
 Not behind a port yet, and why:
 
-- **Math rendering itself** (the hidden WebView, the equation cache, the priority scheduler) is an
-  adapter with its own state. The core sees it only as the injected `substitute` and `pause`
-  functions.
+- **The idle scheduler and the math pacing** (`core/idleScheduler.ts`, `core/mathPacing.ts`) are
+  core modules that take the clock, a timer and the interaction hook as parameters; the one
+  app-wide instance is built in `composition.ts`, and the use cases see it as the injected
+  `pause` and `substitute` functions.
 - **`GraphSource` / `GraphStore`** (F): `inpho.ts` and `graphDb.ts` are still called directly.
 - **`SecretStore`** (H2, E4): the Zotero key now lives in secure storage (`services/secureSecrets.ts`)
   and reaches the use case as a parameter; there is no port because nothing else needs one.

@@ -3,32 +3,30 @@ declare const __dirname: string;
 const fs = require('fs');
 const path = require('path');
 
-const mockEnsure = jest.fn();
 jest.mock('../services/db', () => ({ getMeta: jest.fn(), setMeta: jest.fn() }));
-jest.mock('../services/mathCache', () => ({ ensureMath: (...a: unknown[]) => mockEnsure(...a) }));
-jest.mock('../services/idleScheduler', () => ({ idleScheduler: { schedule: jest.fn() } }));
 
 import { scheduleCommonMathPrewarm, realPrewarmDeps } from '../composition';
 
-// The wiring now lives in the composition root (it used to be services/commonMathWiring.ts).
+// The wiring lives in the composition root (it used to be services/commonMathWiring.ts).
 describe('common-math pre-warm wiring', () => {
   it('schedules exactly one idle task under a stable key', () => {
     const schedule = jest.fn(() => true);
-    scheduleCommonMathPrewarm({ schedule }, realPrewarmDeps());
+    scheduleCommonMathPrewarm({ schedule }, realPrewarmDeps(jest.fn()));
     expect(schedule).toHaveBeenCalledTimes(1);
     expect((schedule.mock.calls[0] as unknown[])[0]).toBe('prewarm-common-math');
   });
 
   it("renders at the lowest ('background') priority, never ungated", async () => {
-    mockEnsure.mockResolvedValue({ complete: true });
-    await realPrewarmDeps().ensure([{ tex: 'x^2', display: false }]);
-    expect(mockEnsure).toHaveBeenCalledWith([{ tex: 'x^2', display: false }], 'background');
+    const ensure = jest.fn().mockResolvedValue({ complete: true });
+    await realPrewarmDeps(ensure).ensure([{ tex: 'x^2', display: false }]);
+    expect(ensure).toHaveBeenCalledWith([{ tex: 'x^2', display: false }], 'background');
   });
 
-  it('source guard: only ensureMath(..., "background") is used for the pre-warm', () => {
-    const src = fs.readFileSync(path.join(__dirname, '..', 'composition.ts'), 'utf8').replace(/\/\/.*$/gm, '');
-    expect(src.match(/ensureMath\(/g)?.length).toBe(1);
-    expect(src).toMatch(/ensureMath\(spots, 'background'\)/);
-    expect(src).not.toMatch(/renderMathBatch|renderMathChunked/);
+  it('source guard: the pre-warm only ever asks for the equation cache at "background" priority', () => {
+    const all = fs.readFileSync(path.join(__dirname, '..', 'composition.ts'), 'utf8').replace(/\/\/.*$/gm, '');
+    const section = all.slice(all.indexOf('export function realPrewarmDeps'), all.indexOf('export function scheduleCommonMathPrewarm'));
+    expect(section.match(/ensure\(/g)?.length).toBe(1);
+    expect(section).toMatch(/ensure\(spots, 'background'\)/);
+    expect(section).not.toMatch(/renderMathBatch|renderMathChunked|null\)/);
   });
 });

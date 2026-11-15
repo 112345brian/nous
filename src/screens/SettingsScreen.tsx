@@ -13,8 +13,7 @@ import {
   getEntryCounts,
 } from '../services/db';
 import type { Prefs } from '../services/db';
-import { downloadAll, syncCachedArticles, exportToSyncFolder, importFromSyncFolder } from '../composition';
-import { withDownloadHold } from '../services/mathPriority';
+import { downloadAll, syncCachedArticles, exportToSyncFolder, importFromSyncFolder, withDownloadHold } from '../composition';
 import type { DownloadProgress } from '../types';
 import { importSeedFromUrl } from '../services/seedImport';
 import type { RootStackParamList } from '../../App';

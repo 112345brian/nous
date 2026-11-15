@@ -35,7 +35,7 @@ const mockRender = jest.fn();
 jest.mock('../mathRender', () => ({ renderMathBatch: (...a: unknown[]) => mockRender(...a) }));
 
 import { completeArticleMath } from '../../composition';   // wired in the composition root
-import { ensureMath, _resetMathCacheState } from '../mathCache';
+import { ensureMath, _resetMathCacheState } from '../../composition';   // built in the root
 import { mathHash } from '../../utils/mathKey';
 
 type Req = { tex: string; display: boolean };

@@ -4,7 +4,7 @@
 // pipeline; db, fetch, the renderer and the clock are fakes.
 import { downloadAll, syncCachedArticles } from '../../composition';
 import * as db from '../db';
-import { _resetMathCacheState } from '../mathCache';
+import { _resetMathCacheState } from '../../composition';   // the math runtime is built in the root
 
 const mockMeta: Record<string, string> = {};
 jest.mock('../db', () => ({

@@ -1,5 +1,12 @@
 import { createIdleScheduler } from '../idleScheduler';
 
+// The scheduler takes its clock and timer as parameters; under jest's fake timers these read the faked ones.
+const clock = {
+  now: () => Date.now(),
+  setTimer: (fn: () => void, ms: number) => setTimeout(fn, ms),
+  clearTimer: (h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>),
+};
+
 // Deterministic: fake timers + an injected "after interactions" hook we control.
 const IDLE = 1000;
 const GAP = 200;
@@ -7,6 +14,7 @@ const GAP = 200;
 function make(extra: Partial<Parameters<typeof createIdleScheduler>[0]> = {}) {
   const errors: Array<[string, unknown]> = [];
   const s = createIdleScheduler({
+    ...clock,
     idleMs: IDLE,
     gapMs: GAP,
     afterInteractions: cb => cb(),

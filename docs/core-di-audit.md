@@ -30,7 +30,7 @@ because they leak state or globals into the logic that calls them.
 |---|---|---|---|---|---|
 | `services/dataSync.ts` | none | `expo-file-system`, `react-native` `Platform`, `fetch`, `db` | `Date` (Zotero "today"), `process.env.HOME` | `SyncFolder`, `UserDataStore`, `ZoteroHttp`, `Clock` | **Converted** (see section 4) |
 | `utils/linkifier.ts` | `_default` (lazy cache of the compiled link index) | none (bundled data module only) | none | the index as a parameter | **Converted**: `createLinkifier(json)`; the lazy default is the one recorded exception |
-| `services/catalog.ts` | `MATH_SUBST_RE` (a global-flag regex, so `lastIndex` state) remains for `substitutemath` | `./db`, `./mathCache`, `./mathPriority`, `fetch` x3 (index, article and notes pages), `./perf` | `setTimeout` (the 30 s abort) | it is now the adapter module: the use cases it used to hold (index refresh, article caching, math completion, bulk download and sync, backfills, footnotes) are all in `src/core`, wired in `composition.ts` | **Converted** (section 4); only `substitutemath` and the upgrade-only `backfillMathHashFormat` remain in logic form (section 8) |
+| `services/catalog.ts` | none | `./db`, `fetch` x3 (index, article and notes pages), `./perf` | `setTimeout` (the 30 s abort) | it is the adapter module for SEP pages; everything else it used to hold is in `src/core`, wired in `composition.ts` | **Converted** (section 4); only the upgrade-only `backfillMathHashFormat` remains in logic form (section 8) |
 | `services/db.ts` | `_db` (connection), `metaCache`, `_linkCache` | `expo-sqlite` | `Date.now` x7 | it **is** the `LibraryStore` / `UserStore` / `KeyValueStore` adapter; nothing to inject into it | Listed; 4 sessions editing it |
 | `services/graphDb.ts` | `_schema` (creates its own tables lazily) | `getDb()` x4 from `./db` | `Date.now` x4 | `GraphStore` adapter; the graph assembly (nodes/edges from rows) is pure and could move inward | Listed |
 | `services/inpho.ts` | `_primedSlugs` (Set) | `fetch` (`getJson`), `expo-file-system` (dev-seed files, `__DEV__` only), `getMeta/setMeta` from `./db` | `Date.now` x2, `setTimeout` x1 | `GraphSource`, `KeyValueStore`, `Clock`, `Sleep` | Listed |
@@ -52,14 +52,19 @@ use case is wired there and nowhere else:
   `services/zoteroHttp.ts`; the user-data store is a small object over `services/db`; the platform
   and home directory are read here, at the edge);
 - the entry-index refresh, article caching, footnote fetching and the deferred-math pipeline
-  (adapters: `services/catalog.ts`, now adapters only, i.e. the three page fetchers and
-  `substitutemath`; plus `services/perf.ts`, the linkifier and the bundled seed index);
+  (adapters: `services/catalog.ts`, now just the three page fetchers; plus `services/perf.ts`,
+  the linkifier and the bundled seed index);
+- the **math runtime**, built once in the root and shared by the UI and the use cases: the idle
+  scheduler (holds, quiet-gap policy, background tasks), the pacing helpers around it, the
+  chunked renderer, the equation cache and the TeX substitution, all from `src/core`, each taking
+  its clock, timer, renderer and store as parameters. `idleScheduler`, `withDownloadHold` and
+  `ensureMath` are exported for the screens and the boot hook;
 - `downloadAll` and `syncCachedArticles`, wrapped in the math priority model's download hold
   (`downloadAll` drains the queued math once the hold is released);
 - the background AST pass (`backfillAst`), paced by the priority model's `yieldThenMathMayRun`;
 - the common-equation pre-warm: its use case is `core/prewarmCommonMath.ts` (it already took
   every dependency as a parameter and imports nothing), and the wiring that used to be
-  `services/commonMathWiring.ts` (the `meta` stamp, `mathCache.ensureMath` at background priority,
+  `services/commonMathWiring.ts` (the `meta` stamp, `ensureMath` at background priority,
   the idle scheduler) is in the root, because connecting concrete adapters to a use case is what
   the root is for;
 - link prefetch: `services/prefetch.ts` keeps the NetInfo/InteractionManager edge and receives
@@ -102,11 +107,12 @@ All conversions keep the old exported function names and signatures, so no calle
 | Composition root | wiring spread over `services/dataSync.ts` and `services/catalog.ts`; UI imported use cases from wherever they lived | `src/composition.ts` owns the sync/Zotero wiring and re-exports the catalog-wired use cases; `ArticleScreen`, `SettingsScreen`, `ReadingListScreen` and `App.tsx` import them from it; `dataSync.ts` keeps only the legacy `syncOnLaunch` no-op that `delete-legacy-compat` removes (left alone so that change still applies) |
 | Bulk download and sync (UC-G1, G2) | `catalog.downloadAll` / `syncCachedArticles` called `fetchAndCacheArticle`, `refreshIndexIfStale`, `./db`, `setTimeout` and `Date.now` directly | `core/libraryDownload.ts` takes the library queries, the bound `cacheArticle` and `refreshIndex` use cases, a `Clock`, `KeyValueStore` and a `Sleep`; the group sizes and pauses (6 / 100 ms and 3 / 200 ms) are named constants; `DownloadProgress` moved to `types.ts`; the wrappers live in `composition.ts` (they only need use cases it already imports one way), so `catalog.ts` lost about 60 lines and `SettingsScreen` and `App.tsx` import them from the root |
 | Backfills (UC-A4) | `catalog.backfillMathInline` / `backfillAst` called `./db`, `substitutemath`, `resumePendingMath` and the priority model directly | `core/backfills.ts`: `backfillAst(deps)` takes the stores and `pause(priority)`; wrapped in the root. `backfillMathInline` was deleted upstream (queued math is drained by `resumePendingMath` instead), so its core version, its flag and its tests went with it |
+| Math runtime (UC-C6; from `math-throttle`) | `services/{idleScheduler,mathPriority,mathCache,mathChunked}.ts` and `catalog.substitutemath`: module-level singletons (`attempts`, `permanentFailures`, the scheduler's queue and holds, the shared regex) reading `Date.now`, `setTimeout`, `InteractionManager` and `__DEV__` directly | `core/idleScheduler.ts` (the clock, timer and interaction hook are parameters), `core/mathPacing.ts`, `core/mathChunked.ts` (`createChunkedRenderer`), `core/mathCache.ts` (`createMathCache`: the failure bookkeeping is closure state, so instances are independent), `core/substituteMath.ts` (`createSubstituteMath`, a fresh regex per call, the tier flag read through the key/value port); the one app-wide set is built in `composition.ts`; `watchStalls` stays in `services/stallWatch.ts` as the dev-only adapter it is; the render request/result types moved to `core/ports.ts` (`MathRequest`, `MathResult`) with new ports `MathRenderer` and `MathStore` |
 | Math gap fix (from `fix-math-gap`) | `fetchAndCacheArticle`, `downloadAll`, `resumePendingMath` edited in place | re-applied in the core versions: `CacheArticleOptions.deferPriority`, `ArticleMath.queueForLater` (a `skipMath` article is queued on `math_pending`, awaited), `completeLater(slug, html, priority)`, and the root's `downloadAll` drains after the hold is released |
 | Common-equation pre-warm (from `common-math-list`) | `services/prewarmCommonMath.ts` + `services/commonMathWiring.ts` | use case moved to `core/prewarmCommonMath.ts`; wiring moved into `composition.ts`; both tests moved with them (the source guard that pins `'background'` now reads `composition.ts`) |
 | Footnote backfill (UC-C4) | `catalog.ensureNotesCached` called `fetch` and `./db` | `core/ensureNotes.ts`; wrapped in the root; `referencesNotes` is shared with the article use case |
 | Math priority model (from `math-throttle`) | `completeArticleMath(slug, html, priority)`, `watchStalls`, `yieldThenMathMayRun`, `withDownloadHold` wired into `catalog.ts` | re-homed behind the ports: `priority` is an argument of `ArticleMath.substitute` (`null` = the caller owns the schedule) and of `completeArticleMath`; the pause and the stall watch are injected into `createMathCompletion`; the download hold wraps the two bulk wrappers in the root |
-| `catalog.ts` | use cases, wiring and adapters in one 590-line file | adapters only (page fetchers, `substitutemath`) plus the upgrade-only `backfillMathHashFormat`; nothing in it calls a converted use case, so the root imports it one way and the RC3 exception is gone |
+| `catalog.ts` | use cases, wiring and adapters in one 590-line file | adapters only (the page fetchers) plus the upgrade-only `backfillMathHashFormat`; nothing in it calls a converted use case, so the root imports it one way and the RC3 exception is gone |
 
 Evidence: `src/services/__tests__/dataSync.test.ts` (14 tests, written before the change
 against the old code and **unchanged** afterwards), the linkifier snapshots (taken from
@@ -142,12 +148,11 @@ only after the performance and db sessions have merged, to avoid conflicts.
    `ArticleSource.fetchArticleHtml`/`fetchNotesHtml`, `ArticleLibrary`, `ArticleMath` and
    `StageTimer`. `fetchNotesHtml` is passed through as it is (network plus a small
    extraction in one function); splitting those is a follow-up.
-2b. ~~The deferred-math completion state machine~~: **done**. What is left of the subsystem is
-   `substitutemath` and what sits behind it (`mathCache` with its module state, `mathChunked`,
-   the priority model's `mathPriority` and `idleScheduler`, and the WebView bridge in
-   `mathRender.ts`). They are adapters with state of their own and the core only sees them as the
-   injected `substitute` and `pause` functions. Converting them means ports for the renderer, the
-   equation store and the scheduler; do it as one slice, not piecemeal.
+2b. ~~The deferred-math completion state machine~~ and ~~the equation pipeline behind it~~
+   (scheduler, pacing, chunked renderer, cache, substitution): **done**, see section 4. What is
+   left is the WebView bridge in `services/mathRender.ts` and the Hermes spike in
+   `mathRenderHermes.ts`, which are the renderer adapter itself: the core sees it only as the
+   injected `render` function (the `MathRenderer` port).
 3. ~~`downloadAll` / `syncCachedArticles`~~ and ~~the backfills~~ (UC-G1, G2, A4): **done**.
    `backfillMathHashFormat` was left alone: see section 8.
 4. **Auto-sync decision in `App.tsx`** (lines ~166-171): a duplicated staleness rule
@@ -159,7 +164,7 @@ only after the performance and db sessions have merged, to avoid conflicts.
    the `_schema` table creation into the migration code (`db-connection-migrations`).
 6. **`inpho.ts`** (UC-F). `fetch` plus `getMeta/setMeta` plus the TTL: ports `GraphSource`,
    `KeyValueStore`, `Clock`; the dev-seed file reading is a `__DEV__`-only adapter.
-7. **`mathRender.ts`**. The module-level bridge to the WebView component is the only
+7. **`mathRender.ts`**: the renderer adapter. The module-level bridge to the WebView component is the only
    global-mutable coupling between a component and a service. Replace the six variables
    with one object created by the composition root and passed to both sides.
 8. **`seedImport.ts`** (UC-A2). Wait for `db-seed-import-safety`.
@@ -253,7 +258,9 @@ Verified against the code. Please fold these into the draft.
 - **Hazard removed:** `completeArticleMath` and `substitutemath` shared one global-flag regex
   (`MATH_SUBST_RE`) and each had to reset `lastIndex = 0` before use; forgetting that in
   either makes `test`/`exec` skip matches. The completion side now uses the stateless
-  `hasTexSpan`; `substitutemath` still has the shared regex until it is converted.
+  `hasTexSpan`; `substituteMath` now builds a fresh regex per call. (With `exec` in a loop the shared
+  regex was harmless in practice, since the loop runs to `null`, which resets it; only the `.test()`
+  use could leak state.)
 - **Behaviour to know (pinned):** `completeArticleMath(slug, html)` returns the in-flight
   promise for that slug even if called with a different `html`, and a completion that finds no
   TeX left in an unchanged article counts as done and notifies listeners.
@@ -284,13 +291,13 @@ branch, and converting everything this audit listed, these remain outside `src/c
 | Left in place | Where | Why |
 |---|---|---|
 | `backfillMathHashFormat` | `services/catalog.ts`, scheduled from `src/boot/useBoot.ts` | Upgrade-only code (it migrates an earlier build's inline-base64 math format; guarded by `math_hash_format_v1`). The brief said `delete-legacy-compat` had deleted it; at the parent tip it is still defined and still scheduled, and `LEGACY_RE` is its regex. By the prerelease rule it should be deleted, not converted, and that is the project owner's call. It touches only the database and the equation table, calls no converted use case, and so does not block anything. |
-| `substitutemath` and the equation pipeline behind it (`mathCache`, `mathChunked`, `mathPriority`, `idleScheduler`, `mathRender`, tiering) | `services/` | Adapters with their own module state (`_resetMathCacheState` exists for tests). The core uses them only through the injected `substitute` and `pause`. Converting them is one slice (renderer, equation store, scheduler ports) and is the largest remaining item. |
+| `services/mathRender.ts` and `mathRenderHermes.ts` | `services/` | The renderer adapter: the WebView bridge (module-level `injectFn`, `readyPromise`, `pending`, `seq`, loaded from `expo-asset` and `expo-file-system`) and the flagged Hermes spike. The core sees it only as the injected `render` function. Making the bridge an instance owned by the root, with `MathRenderWebView` registering into it, would remove the last module-level coupling between a component and a service; it is a separate change. |
 | `db.ts`, `graphDb.ts`, `inpho.ts`, `seedImport.ts`, `secureSecrets.ts`, `downloadNotification.ts`, `mathRender.ts`, `expoSyncFolder.ts`, `zoteroHttp.ts` | `services/` | These are the adapters. They are allowed to be concrete. The pure graph-assembly logic inside `graphDb.ts` and the TTL logic in `inpho.ts` could move inward (section 5, items 4 to 6). |
 | Ten files that import `services/db` | UI and boot | Shrink-only list (RC5). Each needs a wired use case first. |
 | `utils/motion.ts`, `utils/useBackDismiss.ts`, `utils/sepHtml/render/**` | `utils/` | React Native UI code that sits under `utils/`. Recorded as outer-ring exceptions in `innerRing.test.ts` (each is checked to still import react or react-native). They belong in a `ui/` folder; moving them touches imports in files other sessions edit. |
 | `theme/` | UI | Outer ring by definition (the enforcement test lists it). |
 | `useBoot` notifier wiring, `MathRenderWebView` bridge | UI | See section 3. |
-| Module state in adapters: `attempted` in `services/prefetch.ts`, the cache in `mathCache`, `idleScheduler`'s queue | `services/` | Allowed at the edge; a new instance per composition would make these testable without reset helpers. |
+| Module state in adapters: `attempted` in `services/prefetch.ts` and the bridge variables in `mathRender.ts` | `services/` | Allowed at the edge. (The cache, the scheduler and the pacing are now instances built in the root; `_resetMathCacheState` is just that instance's `reset`.) |
 
 ### What the parent's new code added to the picture
 

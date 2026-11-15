@@ -32,8 +32,8 @@ jest.mock('../db', () => ({
 const mockRender = jest.fn();
 jest.mock('../mathRender', () => ({ renderMathBatch: (...a: unknown[]) => mockRender(...a) }));
 
-import { _resetMathCacheState } from '../mathCache';
-import { idleScheduler } from '../idleScheduler';
+import { _resetMathCacheState } from '../../composition';   // the math runtime is built in the root
+import { idleScheduler } from '../../composition';
 import { fetchAndCacheArticle, completeArticleMath, resumePendingMath } from '../../composition';   // wired in the composition root
 import { downloadAll } from '../../composition';   // moved to the composition root
 

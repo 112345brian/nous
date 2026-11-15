@@ -14,15 +14,10 @@ import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system';
 import { HERMES_MATH_ENABLED, renderMathBatchHermes } from './mathRenderHermes';
 
-export interface MathReq { tex: string; display: boolean }
-export interface MathResult {
-  tex: string;
-  display: boolean;
-  b64?: string; // base64 of the standalone SVG (encoded in the WebView)
-  w?: number;
-  h?: number;
-  error?: string;
-}
+// The request and result shapes are the core's (src/core/ports.ts); this adapter implements them.
+import type { MathRequest, MathResult } from '../core/ports';
+export type { MathResult };
+export type MathReq = MathRequest;
 
 let injectFn: ((js: string) => void) | null = null;
 let resolveReady: (() => void) | null = null;
