@@ -30,6 +30,8 @@ import { createMathCache } from './core/mathCache';
 import { createSubstituteMath } from './core/substituteMath';
 import { backfillAst as backfillAstUseCase } from './core/backfills';
 import { ensureNotesCached as ensureNotesUseCase } from './core/ensureNotes';
+import { importSeed, type SeedPhase } from './core/seedImport';
+import { seedFiles, seedDatabase } from './services/seedImport';
 import { fetchIndexHtml, fetchArticleHtml, fetchNotesHtml } from './services/catalog';
 import { renderMathBatch } from './services/mathRender';
 import { watchStalls, highResNow } from './services/stallWatch';
@@ -270,3 +272,26 @@ export function scheduleCommonMathPrewarm(
   return scheduler.schedule(COMMON_MATH_TASK_KEY, () => prewarmCommonMath(deps));
 }
 
+
+// ── Seed import (UC-A2) ──────────────────────────────────────────────────────
+
+export type { SeedPhase };
+
+/**
+ * Replace the local database with the one at `url`, keeping the reader's data. Callers wrap it in
+ * withDownloadHold. The orchestration is src/core/seedImport.ts; the file and connection calls
+ * are the adapters in src/services/seedImport.ts.
+ */
+export function importSeedFromUrl(url: string, onProgress: (p: SeedPhase) => void): Promise<void> {
+  return importSeed(
+    {
+      files: seedFiles,
+      db: seedDatabase,
+      userData: dbUserData,
+      meta: { setMeta },
+      clock: { now: () => Date.now() },
+    },
+    url,
+    onProgress,
+  );
+}

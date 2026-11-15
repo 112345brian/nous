@@ -15,7 +15,7 @@ import {
 import type { Prefs } from '../services/db';
 import { downloadAll, syncCachedArticles, exportToSyncFolder, importFromSyncFolder, withDownloadHold } from '../composition';
 import type { DownloadProgress } from '../types';
-import { importSeedFromUrl } from '../services/seedImport';
+import { importSeedFromUrl } from '../composition';
 import type { RootStackParamList } from '../../App';
 import { colors, themedStyles, roleMap } from '../theme/tokens';
 import { useScheme, type Appearance } from '../theme/ThemeProvider';

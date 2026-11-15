@@ -36,7 +36,7 @@ because they leak state or globals into the logic that calls them.
 | `services/inpho.ts` | `_primedSlugs` (Set) | `fetch` (`getJson`), `expo-file-system` (dev-seed files, `__DEV__` only), `getMeta/setMeta` from `./db` | `Date.now` x2, `setTimeout` x1 | `GraphSource`, `KeyValueStore`, `Clock`, `Sleep` | Listed |
 | `services/mathRender.ts` | 7 module variables (`injectFn`, `domReady`, `resolveReady`, `readyPromise`, `mathJaxLoading`, `seq`, `pending`) forming a bridge to the WebView component | `expo-asset`, `expo-file-system` | `setTimeout` (timeout race) | `MathRenderer` (batch **and** readiness lifecycle) | Listed |
 | `services/downloadNotification.ts` | `state` (throttle bookkeeping) | `react-native` `NativeModules`/`Platform`, `expo-notifications` | `Date.now` x1, `setTimeout` x2 | `ProgressNotifier` adapter | Already injected into the core (see section 3) |
-| `services/seedImport.ts` | none | `expo-file-system` (+ `/legacy`), dynamic `import('./db')` to call `closeDb` | none | `SeedInstaller` (download, close DB, replace file) | Not touched: `db-seed-import-safety` is rewriting it |
+| `services/seedImport.ts` | none | `expo-file-system` (+ `/legacy`), dynamic `import('./db')` to call `closeDb` | none | `SeedFiles`, `SeedDatabase`, `UserDataStore` (export/import), `KeyValueStore`, `Clock` | **Converted**: `core/seedImport.ts` holds download/validate/snapshot/swap/restore/rollback; the adapter is the file and connection calls only; wired in `composition.ts` as `importSeedFromUrl` |
 | `screens/*`, `App.tsx` | n/a (UI) | 10 files import `services/db` as a value (tracked by a shrink-only test) | `InteractionManager` (ArticleScreen only), `Date.now` (HistoryScreen, ArticleScreen `updated_at`, App auto-sync interval), `setTimeout` (UI debounces) | wired use cases | Listed |
 
 Not hidden dependencies (deliberately allowed): `atob`/`btoa` (pure, deterministic; used in
@@ -167,7 +167,7 @@ only after the performance and db sessions have merged, to avoid conflicts.
 7. **`mathRender.ts`**: the renderer adapter. The module-level bridge to the WebView component is the only
    global-mutable coupling between a component and a service. Replace the six variables
    with one object created by the composition root and passed to both sides.
-8. **`seedImport.ts`** (UC-A2). Wait for `db-seed-import-safety`.
+8. ~~`seedImport.ts`~~ (UC-A2): **done**, see section 3 row and `core/seedImport.ts`.
 9. ~~The composition root~~: **done for every converted use case**, see sections 3 and 4. What is
    left is migrating the ten files that import `services/db` to wired use cases, one at a time,
    removing each from the RC5 allowlist as it goes. `theme/ThemeProvider` is the easiest first

@@ -10,7 +10,6 @@ jest.mock('../src/services/db', () => ({
   getRecentSlugs: jest.fn(),
   savePrefs: jest.fn(),
 }));
-jest.mock('../src/services/seedImport', () => ({ importSeedFromUrl: jest.fn() }));
 // The use cases come from the composition root. The common-math pre-warm is wired there too; its
 // stand-in schedules the same task name through the (mocked) idle scheduler, as the real one does.
 jest.mock('../src/composition', () => {
@@ -23,6 +22,7 @@ jest.mock('../src/composition', () => {
     downloadAll: jest.fn(),
     refreshIndexIfStale: jest.fn(),
     syncCachedArticles: jest.fn(),
+    importSeedFromUrl: jest.fn(),
     idleScheduler,
     withDownloadHold: jest.fn((fn: () => Promise<unknown>) => fn()),
     scheduleCommonMathPrewarm: jest.fn(() => idleScheduler.schedule('prewarm-common-math', jest.fn())),
@@ -37,8 +37,8 @@ jest.mock('../src/services/downloadNotification', () => ({
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const db = require('../src/services/db');
-const seed = require('../src/services/seedImport');
 const root = require('../src/composition');
+const seed = root; // importSeedFromUrl is wired in the root
 const { idleScheduler } = require('../src/composition');
 
 const prefs = (over: object = {}) => ({ homeMode: 'search', downloadAll: false, seedUrl: '', ...over });

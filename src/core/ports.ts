@@ -167,3 +167,57 @@ export interface MathStore {
   putMathBatch(rows: Array<{ hash: string; svg: string; w: number; h: number; display: boolean }>): Promise<void>;
 }
 
+
+// ── Seed import (UC-A2) ──────────────────────────────────────────────────────
+
+/** The part of a user-data export the seed import relies on; the adapter owns the rest of the shape. */
+export interface SeedUserDataShape {
+  version: number;
+  annotations: Array<{ id: number; content_hash: string | null }>;
+  prefs?: Record<string, string>;
+}
+
+/** The database files of the local library, addressed by role. `suffix` is '', '-wal' or '-shm'. */
+export interface SeedFiles {
+  /** Download `url` to a temporary file, reporting progress. Resolves to the HTTP status (null when there was no response); rejects on a network failure. */
+  download(url: string, onProgress: (bytesWritten: number, bytesTotal: number) => void): Promise<{ status: number | null }>;
+  /** Size in bytes of the downloaded temporary file, or null when it does not exist. */
+  downloadedSize(): Promise<number | null>;
+  /** Delete the temporary download; a missing file is not an error. */
+  discardDownload(): Promise<void>;
+  /** Create the folder the database lives in. */
+  prepareDbDir(): Promise<void>;
+  hasDb(suffix: string): Promise<boolean>;
+  hasBackup(suffix: string): Promise<boolean>;
+  /** Copy the database file to the backup location (the original stays). */
+  backUpDb(suffix: string): Promise<void>;
+  /** Delete a database file; a missing file is not an error. */
+  removeDb(suffix: string): Promise<void>;
+  /** Move the backup file back to the database location. */
+  restoreBackup(suffix: string): Promise<void>;
+  /** Rename a backup file so it is kept under `tag`, out of the way of the next backup. */
+  setAsideBackup(suffix: string, tag: string): Promise<void>;
+  removeBackup(suffix: string): Promise<void>;
+  /** Move the downloaded file into place as the main database file. */
+  installDownload(): Promise<void>;
+  /** Where the backup lives, for the error message when it cannot be put back. */
+  readonly backupLocation: string;
+}
+
+/** The open local database, as far as the seed swap needs it. */
+export interface SeedDatabase {
+  /** Close the connection (the next use reopens it lazily, on whatever file is then in place). */
+  close(): Promise<void>;
+  /** Every `meta` row. */
+  listMeta(): Promise<Array<{ key: string; value: string | null }>>;
+  /** Reading progress of every entry that has some. */
+  listReadProgress(): Promise<Array<{ slug: string; read_progress: number }>>;
+  /**
+   * In one transaction: set annotations.content_hash by id, and read_progress by slug (only for
+   * entries that exist; nothing is invented).
+   */
+  restoreDerived(data: {
+    annotationHashes: Array<{ id: number; content_hash: string }>;
+    readProgress: Array<{ slug: string; read_progress: number }>;
+  }): Promise<void>;
+}

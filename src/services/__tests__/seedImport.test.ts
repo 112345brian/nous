@@ -38,8 +38,8 @@ jest.mock('expo-file-system', () => {
 jest.mock('expo-file-system/legacy', () => require('./seedImportWorld').fakeLegacyFs);
 jest.mock('../db', () => require('./seedImportWorld').fakeDbModule);
 
-import * as seed from '../seedImport';
-const { importSeedFromUrl } = seed;
+import * as seed from '../../core/seedImport';
+import { importSeedFromUrl } from '../../composition';
 
 const URL = 'https://example.test/seed.db';
 const DOC_SQLITE = DB_PATH.slice(0, DB_PATH.lastIndexOf('/') + 1);
