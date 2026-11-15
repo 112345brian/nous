@@ -38,6 +38,7 @@ export const PRESERVED_META_KEYS: ReadonlySet<string> = new Set([
   'onboarding_done', // not in the user-data export; losing it re-runs onboarding
   'custom_css',
   'font_size',
+  'appearance', // Auto/Light/Dark theme choice (src/theme/ThemeProvider.tsx)
   'auto_sync',
   'link_preview',
   'graph_visited_only',
