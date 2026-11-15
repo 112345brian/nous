@@ -5,6 +5,8 @@ import { mathTierStamp, TIERED_MATH_DEFAULT } from '../utils/mathTier';
 import { CORE_MIGRATIONS } from './coreMigrations';
 import { runMigrations, userVersionStore } from './migrations';
 import { secretsAvailable, getSecret, setSecret, deleteSecret } from './secureSecrets';
+import { mergeAnnotation, newUid } from './annotationMerge';
+import { mergeRead } from './readsMerge';
 
 // One shared connection. getDb() caches the *promise* of an opened-and-migrated
 // database, so concurrent callers share a single open and none can observe a
@@ -379,7 +381,7 @@ export async function recordRead(
       : String(now);
 
   await db.runAsync(
-    `INSERT INTO reads (slug, title, visited_at, from_slug, session_id)
+    `INSERT OR IGNORE INTO reads (slug, title, visited_at, from_slug, session_id)
      VALUES (?, ?, ?, ?, ?)`,
     [slug, title, now, fromSlug ?? null, sessionId]
   );
@@ -851,13 +853,15 @@ export async function saveAnnotation(
 ): Promise<Annotation> {
   const db = await getDb();
   const now = Date.now();
+  const uid = newUid();
   const result = await db.runAsync(
-    `INSERT INTO annotations (slug, selected_text, context, note, color, content_hash, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [slug, selectedText, context ?? null, note ?? null, color, currentHash ?? null, now, now]
+    `INSERT INTO annotations (uid, slug, selected_text, context, note, color, content_hash, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [uid, slug, selectedText, context ?? null, note ?? null, color, currentHash ?? null, now, now]
   );
   return {
     id: result.lastInsertRowId,
+    uid,
     slug, selected_text: selectedText, context: context ?? null,
     note: note ?? null, color, content_hash: currentHash ?? null,
     created_at: now, updated_at: now,
@@ -945,13 +949,9 @@ export async function exportUserData(): Promise<UserDataExport> {
 export async function importUserData(data: UserDataExport): Promise<void> {
   const db = await getDb();
   await db.withTransactionAsync(async () => {
-    // Reads: insert-or-ignore by (slug, visited_at) to avoid dupes
-    for (const r of data.reads) {
-      await db.runAsync(
-        `INSERT OR IGNORE INTO reads (slug, title, visited_at, from_slug, session_id)
-         VALUES (?, ?, ?, ?, ?)`,
-        [r.slug, r.title, r.visited_at, r.from_slug ?? null, r.session_id]
-      );
+    // Reads: identity is (slug, visited_at, session_id); see readsMerge.ts.
+    for (const r of data.reads ?? []) {
+      await mergeRead(db, r);
     }
     // Bookmarks: upsert by slug, keep newest saved_at
     for (const b of data.bookmarks) {
@@ -965,18 +965,10 @@ export async function importUserData(data: UserDataExport): Promise<void> {
         [b.slug, b.title, b.saved_at, b.notes ?? null]
       );
     }
-    // Annotations: upsert by id — incoming id wins on conflict
-    for (const a of data.annotations) {
-      await db.runAsync(
-        `INSERT INTO annotations (id, slug, selected_text, context, note, color, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           note = COALESCE(excluded.note, note),
-           color = excluded.color,
-           updated_at = MAX(updated_at, excluded.updated_at)`,
-        [a.id, a.slug, a.selected_text, a.context ?? null,
-         a.note ?? null, a.color, a.created_at, a.updated_at]
-      );
+    // Annotations: matched across devices by uid (never by the local integer id),
+    // last writer wins per record — see annotationMerge.ts.
+    for (const a of data.annotations ?? []) {
+      await mergeAnnotation(db, a);
     }
     // Prefs: merge, remote wins — allowlisted keys only, so a file can never
     // write credentials, device paths or caches into this device's meta.

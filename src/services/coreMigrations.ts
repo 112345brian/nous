@@ -9,6 +9,7 @@
 // when already applied. The initial step records version 2 (the current parser).
 
 import type { Migration } from './migrations';
+import { READS_UNIQUE_INDEX_SQL } from './readsMerge';
 
 // The initial schema (version 1): final tables, columns, FTS table and indexes.
 //
@@ -77,6 +78,7 @@ const SCHEMA_V1_SQL = `
 
     CREATE TABLE annotations (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      uid           TEXT,
       slug          TEXT NOT NULL,
       selected_text TEXT NOT NULL,
       context       TEXT,
@@ -126,6 +128,15 @@ const QUERY_INDEXES = [
   'CREATE INDEX idx_annotations_slug ON annotations(slug, created_at)',
 ];
 
+// Cross-device identity (sync): integer ids are device-local, so annotations carry a
+// uid and a read is identified by (slug, visited_at, session_id). Both are unique so
+// importing the same file twice cannot duplicate rows (see annotationMerge.ts,
+// readsMerge.ts).
+const IDENTITY_INDEXES = [
+  'CREATE UNIQUE INDEX idx_annotations_uid ON annotations(uid)',
+  READS_UNIQUE_INDEX_SQL,
+];
+
 const FTS_SQL = `
     CREATE VIRTUAL TABLE entries_fts USING fts5(
       slug UNINDEXED,
@@ -142,6 +153,7 @@ export const CORE_MIGRATIONS: readonly Migration[] = [
       await db.execAsync(SCHEMA_V1_SQL);
       await db.execAsync(FTS_SQL);
       for (const sql of QUERY_INDEXES) await db.runAsync(sql);
+      for (const sql of IDENTITY_INDEXES) await db.runAsync(sql);
       await db.runAsync('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', ['ast_parser_version', '2']);
     },
   },
