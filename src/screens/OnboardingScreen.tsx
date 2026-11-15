@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Prefs } from '../services/db';
+import { colors, themedStyles } from '../theme/tokens';
 
 const SCOPE_DOWNLOAD_DESC: Record<Prefs['libraryScope'], string> = {
   all:  'Fetch all ~1,800 SEP articles + OWL ontology upfront. Works fully offline from day one.',
@@ -70,7 +71,7 @@ export default function OnboardingScreen({ onDone }: Props) {
       </View>
 
       {/* CTA */}
-      <TouchableOpacity style={styles.cta} onPress={next} activeOpacity={0.8}>
+      <TouchableOpacity accessibilityRole="button" style={styles.cta} onPress={next} activeOpacity={0.8}>
         <Text style={styles.ctaText}>
           {step === 'home' ? 'Done' : 'Continue'}
         </Text>
@@ -152,7 +153,7 @@ function LibraryStep({
         <TextInput
           style={styles.urlInput}
           placeholder="https://example.com/nous.db"
-          placeholderTextColor="#444"
+          placeholderTextColor={colors.textMuted}
           value={seedUrl}
           onChangeText={onSeedUrlChange}
           autoCapitalize="none"
@@ -179,7 +180,7 @@ function ScopeToggle({
   return (
     <View style={styles.scopeRow}>
       {options.map(o => (
-        <TouchableOpacity
+        <TouchableOpacity accessibilityRole="button"
           key={o.key}
           style={[styles.scopeChip, value === o.key && styles.scopeChipActive]}
           onPress={() => onChange(o.key)}
@@ -238,7 +239,7 @@ function Option({
   badge?: string;
 }) {
   return (
-    <TouchableOpacity
+    <TouchableOpacity accessibilityRole="button"
       style={[styles.option, selected && styles.optionSelected]}
       onPress={onPress}
       activeOpacity={0.7}
@@ -259,10 +260,10 @@ function Option({
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => themedStyles(() => StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: colors.bg,
     paddingHorizontal: 24,
   },
   dots: {
@@ -273,9 +274,9 @@ const styles = StyleSheet.create({
   },
   dot: {
     width: 5, height: 5, borderRadius: 3,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: colors.elevated,
   },
-  dotActive: { backgroundColor: '#7ba4ff' },
+  dotActive: { backgroundColor: colors.accentSoft },
 
   content: { flex: 1, justifyContent: 'center' },
 
@@ -283,7 +284,7 @@ const styles = StyleSheet.create({
 
   // Welcome
   logo: {
-    color: '#7ba4ff',
+    color: colors.accentSoft,
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 4,
@@ -291,27 +292,27 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   title: {
-    color: '#e8e8e8',
+    color: colors.text,
     fontSize: 26,
     fontWeight: '300',
     lineHeight: 34,
     marginBottom: 16,
   },
   sub: {
-    color: '#666',
+    color: colors.textMuted,
     fontSize: 16,
     lineHeight: 24,
   },
 
   // Steps
   stepTitle: {
-    color: '#e8e8e8',
+    color: colors.text,
     fontSize: 22,
     fontWeight: '500',
     marginBottom: 6,
   },
   stepSub: {
-    color: '#666',
+    color: colors.textMuted,
     fontSize: 15,
     marginBottom: 24,
   },
@@ -323,39 +324,39 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: colors.border,
     marginBottom: 10,
-    backgroundColor: '#171717',
+    backgroundColor: colors.surface,
   },
   optionSelected: {
-    borderColor: '#7ba4ff',
-    backgroundColor: '#131a2e',
+    borderColor: colors.accentSoft,
+    backgroundColor: colors.accentWash,
   },
   optionRadio: {
     width: 20, height: 20, borderRadius: 10,
-    borderWidth: 1.5, borderColor: '#444',
+    borderWidth: 1.5, borderColor: colors.border,
     alignItems: 'center', justifyContent: 'center',
     marginTop: 1,
     flexShrink: 0,
   },
   optionRadioFill: {
     width: 10, height: 10, borderRadius: 5,
-    backgroundColor: '#7ba4ff',
+    backgroundColor: colors.accentSoft,
   },
   optionText: { flex: 1 },
   optionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
-  optionTitle: { color: '#888', fontSize: 15, fontWeight: '500' },
-  optionTitleSelected: { color: '#e8e8e8' },
-  optionDesc: { color: '#555', fontSize: 13, lineHeight: 18 },
+  optionTitle: { color: colors.textMuted, fontSize: 15, fontWeight: '500' },
+  optionTitleSelected: { color: colors.text },
+  optionDesc: { color: colors.textMuted, fontSize: 13, lineHeight: 18 },
   badge: {
-    color: '#7ba4ff',
-    fontSize: 10,
+    color: colors.accentSoft,
+    fontSize: 11,
     fontWeight: '600',
     letterSpacing: 0.5,
     textTransform: 'uppercase',
-    backgroundColor: '#131a2e',
+    backgroundColor: colors.accentWash,
     borderWidth: 1,
-    borderColor: '#7ba4ff',
+    borderColor: colors.accentSoft,
     borderRadius: 4,
     paddingHorizontal: 5,
     paddingVertical: 2,
@@ -373,28 +374,28 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
-    backgroundColor: '#171717',
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
   },
   scopeChipActive: {
-    borderColor: '#7ba4ff',
-    backgroundColor: '#131a2e',
+    borderColor: colors.accentSoft,
+    backgroundColor: colors.accentWash,
   },
   scopeChipText: {
-    color: '#666',
+    color: colors.textMuted,
     fontSize: 14,
     fontWeight: '500',
   },
   scopeChipTextActive: {
-    color: '#7ba4ff',
+    color: colors.accentSoft,
   },
 
   urlInput: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: colors.border,
     borderRadius: 10,
-    color: '#e8e8e8',
+    color: colors.text,
     fontSize: 13,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -403,15 +404,15 @@ const styles = StyleSheet.create({
 
   // CTA
   cta: {
-    backgroundColor: '#7ba4ff',
+    backgroundColor: colors.accentSoft,
     borderRadius: 12,
     paddingVertical: 15,
     alignItems: 'center',
     marginTop: 8,
   },
   ctaText: {
-    color: '#0a0f1e',
+    color: colors.onAccentText,
     fontSize: 16,
     fontWeight: '700',
   },
-});
+})));

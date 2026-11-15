@@ -5,20 +5,21 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Annotation } from '../types';
 import { parseToc } from '../utils/parseToc';
+import { colors, roleMap } from '../theme/tokens';
 
 // ── Design tokens ──────────────────────────────────────────────────────────
-const C = {
-  bgSurface:    '#1c1c1c',
-  bgElevated:   '#252525',
-  border:       '#2e2e2e',
-  borderSubtle: '#222222',
-  text:         '#e4e4e4',
-  textSec:      '#9a9a9a',
-  textHint:     '#555555',
-  accent:       '#5b8ef5',
-  accentDim:    'rgba(91,142,245,.14)',
+const C = roleMap({
+  bgSurface: 'surface',
+  bgElevated: 'elevated',
+  border: 'border',
+  borderSubtle: 'borderSubtle',
+  text: 'text',
+  textSec: 'textMuted',
+  textHint: 'textMuted',
+  accent: 'accent',
+  accentDim: 'rgba(91,142,245,.14)',
   accentBorder: 'rgba(91,142,245,.35)',
-};
+});
 
 export const TOC_SHEET_H = 350;
 
@@ -57,11 +58,11 @@ export default function TocSheet({ tocHtml, annotations, slideAnim, onClose, onT
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
       {/* Scrim — tap to close, fades in as sheet rises */}
       <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]} pointerEvents="auto">
-        <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
+        <Pressable accessibilityRole="button" accessibilityLabel="Dismiss" style={StyleSheet.absoluteFillObject} onPress={onClose} />
       </Animated.View>
 
       {/* Bottom sheet */}
-      <Animated.View style={[styles.sheet, { paddingBottom: insets.bottom, transform: [{ translateY: slideAnim }] }]}>
+      <Animated.View accessibilityViewIsModal style={[styles.sheet, { paddingBottom: insets.bottom, transform: [{ translateY: slideAnim }] }]}>
 
         {/* Drag handle (mock: 36×4, color var(--border)=#2e2e2e, margin:10px auto 0) */}
         <View style={styles.handle} />
@@ -71,7 +72,7 @@ export default function TocSheet({ tocHtml, annotations, slideAnim, onClose, onT
           {(['contents', 'annotations'] as const).map(t => {
             const active = tab === t;
             return (
-              <TouchableOpacity
+              <TouchableOpacity accessibilityRole="button"
                 key={t}
                 style={[styles.tab, active && styles.tabActive]}
                 onPress={() => setTab(t)}
@@ -99,7 +100,7 @@ export default function TocSheet({ tocHtml, annotations, slideAnim, onClose, onT
               <Text style={styles.empty}>No table of contents.</Text>
             )}
             {tocItems.map((item, i) => (
-              <TouchableOpacity
+              <TouchableOpacity accessibilityRole="button"
                 key={i}
                 style={[styles.tocItem, item.level > 0 && styles.tocItemH3]}
                 onPress={() => { onTocJump(item.href); onClose(); }}
@@ -125,7 +126,7 @@ export default function TocSheet({ tocHtml, annotations, slideAnim, onClose, onT
               </Text>
             )}
             {annotations.map(ann => (
-              <TouchableOpacity
+              <TouchableOpacity accessibilityRole="button"
                 key={ann.id}
                 style={[styles.annCard, { borderLeftColor: ANN_COLORS[ann.color] ?? '#fbbf24' }]}
                 onPress={() => { onAnnotationTap(ann); onClose(); }}

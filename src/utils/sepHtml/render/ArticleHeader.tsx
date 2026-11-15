@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { Text, View } from 'react-native';
 import { parseSepHtml } from '../parse';
 import { Blocks, type BlockHandlers } from './Blocks';
-import { sepHeader } from './theme';
+import { useSepTheme } from './theme';
 
 interface Props {
   title: string;
@@ -19,6 +19,7 @@ interface Props {
 // #preamble chrome. Scrolls with the article body (it's rendered inside the
 // SepArticle ScrollView via the `header` prop), so the title recedes as you read.
 export function ArticleHeader({ title, parentLabel, preambleHtml, onLinkPress, onFootnotePress }: Props) {
+  const sepHeader = useSepTheme().header;
   const preamble = useMemo(() => {
     if (!preambleHtml || !preambleHtml.trim()) return null;
     // Strip the <h1> (rendered separately as the title) and neutralize the
@@ -32,7 +33,7 @@ export function ArticleHeader({ title, parentLabel, preambleHtml, onLinkPress, o
   }, [preambleHtml]);
   const handlers: BlockHandlers = useMemo(
     () => ({ onLinkPress, onFootnotePress, textStyle: sepHeader.preambleText }),
-    [onLinkPress, onFootnotePress]
+    [onLinkPress, onFootnotePress, sepHeader]
   );
 
   return (

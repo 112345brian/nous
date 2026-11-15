@@ -24,8 +24,8 @@ Status legend used in the audit:
 | TOKEN-05 | border | `#2e2e2e` |
 | TOKEN-06 | border-subtle | `#222222` |
 | TOKEN-07 | text | `#e4e4e4` |
-| TOKEN-08 | text-sec | `#9a9a9a` |
-| TOKEN-09 | text-hint | `#555555` |
+| TOKEN-08 | text-sec | `#a8a8a8` (was `#9a9a9a`; now `textSecondary` in `src/theme/tokens.ts`) |
+| TOKEN-09 | text-hint | `#909090` (was `#555555`, 2.5:1; now `colors.textMuted` in `src/theme/tokens.ts`) |
 | TOKEN-10 | accent | `#5b8ef5` |
 | TOKEN-11 | accent-dim | `rgba(91,142,245,.14)` |
 | TOKEN-12 | accent-border | `rgba(91,142,245,.35)` |
@@ -219,3 +219,16 @@ against the build's source. Latest run: **94 tests passing, 9 suites**.
 - **Search screen** is implemented as a tab inside Home rather than a separate
   route; result rows reuse the home page-row rather than the mockup's `.sr` layout
   with inline `<mark>` match highlighting. ⚠️
+
+## Appearance (light / dark)
+
+The mockup above is the **dark** scheme. A second scheme, "warm paper", was added; both resolve from one set of roles in `src/theme/tokens.ts`. Screens read `colors.<role>` at render time and never name a hex.
+
+| ID | Item | Spec |
+|----|------|------|
+| THEME-01 | Setting | Settings → Reading → Appearance: Auto / Light / Dark. Auto follows the OS; unknown OS value falls back to dark. Stored as `appearance` in meta. |
+| THEME-02 | Light ground | Cream page `#f7f2e8`, surfaces `#fdfaf3` / `#efe8d9`; never pure white or pure black. |
+| THEME-03 | Light text | Ink `#231f1a`; secondary `#4a443b`; muted `#6a6255`. Every text role ≥ 4.5:1 on every surface in both schemes. |
+| THEME-04 | Light accent | `#2a58c8` (darkened so it reads as text). Same jobs as dark: links, active state, primary action. |
+| THEME-05 | Switching | The reader re-renders without remounting (scroll position kept); list screens remount. System bars and status-bar glyphs follow the scheme. |
+| THEME-06 | Highlights | Annotation highlight colours are the same in both schemes. |

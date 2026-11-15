@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ActivityIndicator,
-  TouchableOpacity, Share, Linking, Pressable, Animated, ScrollView,
+  TouchableOpacity, Share, Linking, Pressable, Animated, ScrollView, Platform,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -27,6 +27,9 @@ import { parseSepHtml } from '../utils/sepHtml/parse';
 import { collectMathHashes } from '../utils/sepHtml/collectMathHashes';
 import { SepArticle, type SepArticleHandle } from '../utils/sepHtml/render/SepArticle';
 import { ArticleHeader } from '../utils/sepHtml/render/ArticleHeader';
+import { springTo } from '../utils/motion';
+import { useBackDismiss } from '../utils/useBackDismiss';
+import { SepThemeProvider, parseReaderFontSize, DEFAULT_READER_FONT } from '../utils/sepHtml/render/theme';
 import type { Inline } from '../utils/sepHtml/types';
 import AnnotationModal from '../components/AnnotationModal';
 import TocSheet, { TOC_SHEET_H } from '../components/TocSheet';
@@ -37,6 +40,7 @@ import type { EntryRow, Annotation } from '../types';
 import { resolveEntryHash } from '../services/db';
 import { partitionAnnotations } from '../utils/annotationValidity';
 import type { RootStackParamList } from '../../App';
+import { colors, themedStyles } from '../theme/tokens';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'Article'>;
 type Route = RouteProp<RootStackParamList, 'Article'>;
@@ -59,7 +63,7 @@ const SEP_BASE = 'https://plato.stanford.edu';
 // WebView that sizes itself to content. Used as the renderFallback for SepArticle.
 function FallbackBlock({ html, baseUrl }: { html: string; baseUrl: string }) {
   const [height, setHeight] = useState(120);
-  const doc = `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;padding:8px;background:#1a1a1a;color:#d0d0d0;font-family:-apple-system,sans-serif;font-size:14px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #333;padding:4px 8px}</style></head><body>${html}<script>window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(String(document.body.scrollHeight));<\/script></body></html>`;
+  const doc = `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;padding:8px;background:${colors.surface};color:${colors.prose};font-family:-apple-system,sans-serif;font-size:14px}table{border-collapse:collapse;width:100%}td,th{border:1px solid ${colors.border};padding:4px 8px}</style></head><body>${html}<script>window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(String(document.body.scrollHeight));<\/script></body></html>`;
   return (
     <WebView
       source={{ html: doc, baseUrl }}
@@ -78,15 +82,20 @@ const USE_NATIVE_RENDERER = true;
 
 // ── Icon helpers ───────────────────────────────────────────────────────────
 
-function IBtn({ onPress, children }: { onPress: () => void; children: React.ReactNode }) {
+function IBtn({ onPress, label, children }: { onPress: () => void; label: string; children: React.ReactNode }) {
   return (
-    <TouchableOpacity style={styles.iBtn} onPress={onPress} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+    <TouchableOpacity
+      style={styles.iBtn}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
       {children}
     </TouchableOpacity>
   );
 }
 
-function IconBack({ color = '#9a9a9a' }: { color?: string }) {
+function IconBack({ color = colors.textMuted }: { color?: string }) {
   return (
     <Svg width={21} height={21} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
       <Path d="M19 12H5M12 5l-7 7 7 7" />
@@ -94,7 +103,7 @@ function IconBack({ color = '#9a9a9a' }: { color?: string }) {
   );
 }
 
-function IconSearch({ color = '#9a9a9a' }: { color?: string }) {
+function IconSearch({ color = colors.textMuted }: { color?: string }) {
   return (
     <Svg width={21} height={21} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
       <Circle cx="11" cy="11" r="7" />
@@ -103,7 +112,7 @@ function IconSearch({ color = '#9a9a9a' }: { color?: string }) {
   );
 }
 
-function IconDots({ color = '#9a9a9a' }: { color?: string }) {
+function IconDots({ color = colors.textMuted }: { color?: string }) {
   return (
     <Svg width={21} height={21} viewBox="0 0 24 24" fill={color} stroke="none">
       <Circle cx="12" cy="5" r="1.5" />
@@ -113,23 +122,23 @@ function IconDots({ color = '#9a9a9a' }: { color?: string }) {
   );
 }
 
-function IconMessage({ color = '#5b8ef5' }: { color?: string }) {
+function IconList({ color = colors.textMuted }: { color?: string }) {
   return (
-    <Svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <Path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    <Svg width={21} height={21} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
     </Svg>
   );
 }
 
 function IconBookmark({ active = false }: { active?: boolean }) {
   return (
-    <Svg width={21} height={21} viewBox="0 0 24 24" fill={active ? '#e03030' : 'none'} stroke={active ? '#e03030' : '#9a9a9a'} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+    <Svg width={21} height={21} viewBox="0 0 24 24" fill={active ? colors.danger : 'none'} stroke={active ? colors.danger : colors.textMuted} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
       <Path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
     </Svg>
   );
 }
 
-function IconShare({ color = '#9a9a9a' }: { color?: string }) {
+function IconShare({ color = colors.textMuted }: { color?: string }) {
   return (
     <Svg width={21} height={21} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
       <Path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
@@ -139,7 +148,7 @@ function IconShare({ color = '#9a9a9a' }: { color?: string }) {
   );
 }
 
-function IconGraph({ color = '#9a9a9a' }: { color?: string }) {
+function IconGraph({ color = colors.textMuted }: { color?: string }) {
   return (
     <Svg width={21} height={21} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
       <Circle cx="18" cy="5" r="3" />
@@ -156,7 +165,7 @@ function ArticleToc({ tocHtml, onJump }: { tocHtml: string; onJump: (href: strin
   return (
     <View style={tocInlineStyles.wrap}>
       {items.map((item, i) => (
-        <TouchableOpacity
+        <TouchableOpacity accessibilityRole="button"
           key={i}
           style={[tocInlineStyles.row, item.level === 1 && tocInlineStyles.rowSub]}
           onPress={() => onJump(item.href)}
@@ -172,13 +181,13 @@ function ArticleToc({ tocHtml, onJump }: { tocHtml: string; onJump: (href: strin
   );
 }
 
-const tocInlineStyles = StyleSheet.create({
+const tocInlineStyles = themedStyles(() => themedStyles(() => StyleSheet.create({
   wrap: {
     marginTop: -19,
     marginBottom: 4,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: '#2a2a2a',
+    borderColor: colors.border,
   },
   row: {
     flexDirection: 'row',
@@ -187,13 +196,13 @@ const tocInlineStyles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 2,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#1e1e1e',
+    borderBottomColor: colors.borderSubtle,
   },
   rowSub: { paddingLeft: 20 },
-  num: { fontSize: 12, color: '#444', minWidth: 22, lineHeight: 19, flexShrink: 0 },
-  text: { fontSize: 14, color: '#c0c0c0', lineHeight: 19, flex: 1 },
-  textSub: { fontSize: 13, color: '#777' },
-});
+  num: { fontSize: 12, color: colors.textMuted, minWidth: 22, lineHeight: 19, flexShrink: 0 },
+  text: { fontSize: 14, color: colors.textSecondary, lineHeight: 19, flex: 1 },
+  textSub: { fontSize: 13, color: colors.textMuted },
+})));
 
 // ── Component ──────────────────────────────────────────────────────────────
 
@@ -205,6 +214,14 @@ export default function ArticleScreen() {
   const [state, setState] = useState<LoadState>({ phase: 'loading' });
   const [webReady, setWebReady] = useState(false);
   const [bookmarked, setBookmarked] = useState(false);
+  // Reader base font size (Settings → Reading → Font size). Re-read on focus so
+  // a change made in Settings applies when the reader is returned to.
+  const [readerFont, setReaderFont] = useState(DEFAULT_READER_FONT);
+  useEffect(() => {
+    const refresh = () => getMeta('font_size').then(v => setReaderFont(parseReaderFontSize(v))).catch(() => {});
+    refresh();
+    return nav.addListener('focus', refresh);
+  }, [nav]);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [orphaned, setOrphaned] = useState<Annotation[]>([]);
   const [orphanDismissed, setOrphanDismissed] = useState(false);
@@ -392,6 +409,7 @@ export default function ArticleScreen() {
       await primeGraphLayouts([slug, ...rest]);
     });
     const fontSize = fontSizeStr ? parseInt(fontSizeStr, 10) : undefined;
+    setReaderFont(parseReaderFontSize(fontSizeStr));
 
     // Show article immediately — don't wait for backlink count.
     setState({
@@ -603,33 +621,37 @@ export default function ArticleScreen() {
 
   const displayTitle = state.phase === 'ready' ? state.entry.title : title;
 
-  const openGraph = () =>
-    nav.navigate('Graph', { centerSlug: slug, centerTitle: displayTitle });
-
-  const navBackTop = useCallback(() => nav.popToTop(), [nav]);
+  const openGraph = useCallback(
+    () => nav.navigate('Graph', { centerSlug: slug, centerTitle: displayTitle }),
+    [nav, slug, displayTitle],
+  );
 
   // ── Gestures ──
 
   // Swipe DOWN on the header → graph view (mockup: "swipe down from top").
-  const swipeGraph = Gesture.Pan()
+  const swipeGraph = useMemo(() => Gesture.Pan()
     .runOnJS(true)
     .activeOffsetY(18)
     .onEnd(e => {
       if (e.translationY > 50) openGraph();
-    });
+    }), [openGraph]);
 
   const closeToc = useCallback(() => {
-    Animated.spring(tocSlideAnim, {
-      toValue: TOC_SHEET_H,
-      useNativeDriver: true,
-      damping: 28,
-      stiffness: 320,
-      mass: 0.9,
-    }).start(({ finished }) => { if (finished) setShowToc(false); });
+    springTo(tocSlideAnim, TOC_SHEET_H, ({ finished }) => { if (finished) setShowToc(false); });
   }, [tocSlideAnim]);
 
-  // Bottom handle: tap (Pressable — instant) or swipe up (Pan gesture).
-  const tocSwipe = Gesture.Pan()
+  // Open the contents sheet from rest: mount it off-screen, then spring it up.
+  // (Mounting alone leaves it at its closed offset, so every open path animates.)
+  const openToc = useCallback(() => {
+    setShowToc(true);
+    tocSlideAnim.stopAnimation();
+    tocSlideAnim.setValue(TOC_SHEET_H);
+    springTo(tocSlideAnim, 0);
+  }, [tocSlideAnim]);
+
+  // Bottom handle: tap or swipe up (Pan gesture). Same destination as the bar's
+  // Contents button.
+  const tocSwipe = useMemo(() => Gesture.Pan()
     .runOnJS(true)
     .activeOffsetY(-12)
     .onStart(() => {
@@ -642,25 +664,21 @@ export default function ArticleScreen() {
     })
     .onEnd(e => {
       if (e.translationY < -80 || e.velocityY < -500) {
-        Animated.spring(tocSlideAnim, {
-          toValue: 0,
-          useNativeDriver: true,
-          damping: 28,
-          stiffness: 320,
-          mass: 0.9,
-        }).start();
+        springTo(tocSlideAnim, 0);
       } else {
         closeToc();
       }
-    });
+    }), [closeToc, tocSlideAnim]);
 
   // Swipe right from the left edge → go back. Android's native swipe-back is
   // unreliable here (3-button nav + predictive back broken on react-native-screens),
   // so we own it. hitSlop restricts activation to the first 20pt from the left
   // edge; failOffsetY gives vertical scroll priority if the finger drifts up/down
   // first; activeOffsetX([10, 9999]) only triggers on rightward movement.
-  const edgeBack = Gesture.Pan()
+  const edgeBack = useMemo(() => Gesture.Pan()
     .runOnJS(true)
+    // iOS/macOS already have a system edge-swipe back; running ours too can pop twice.
+    .enabled(Platform.OS === 'android')
     .hitSlop({ left: 0, width: 20 })
     .activeOffsetX([10, 9999])
     .failOffsetY([-8, 8])
@@ -668,7 +686,13 @@ export default function ArticleScreen() {
       if (e.translationX > 80 || e.velocityX > 500) {
         nav.goBack();
       }
-    });
+    }), [nav]);
+
+  // Android Back closes the topmost overlay before leaving the article.
+  useBackDismiss(showOverflow, () => setShowOverflow(false));
+  useBackDismiss(showToc, closeToc);
+  useBackDismiss(!!footnote, () => setFootnote(null));
+  useBackDismiss(!!linkPreview, () => setLinkPreview(null));
 
   return (
     <GestureDetector gesture={edgeBack}>
@@ -676,37 +700,46 @@ export default function ArticleScreen() {
       {/* ── App bar (swipe down → graph) ── */}
       <GestureDetector gesture={swipeGraph}>
       <View style={[styles.appBar, { paddingTop: insets.top }]}>
-        <IBtn onPress={() => nav.goBack()}>
+        <IBtn onPress={() => nav.goBack()} label="Back">
           <IconBack />
         </IBtn>
         <View style={{ flex: 1 }} />
-        <IBtn onPress={() => { nav.popToTop(); }}>
-          <IconSearch />
+        <IBtn onPress={openToc} label="Contents and annotations">
+          <IconList />
         </IBtn>
-        <IBtn onPress={() => setShowOverflow(v => !v)}>
+        <IBtn onPress={handleBookmark} label={bookmarked ? 'Remove bookmark' : 'Bookmark this article'}>
+          <IconBookmark active={bookmarked} />
+        </IBtn>
+        <IBtn onPress={openGraph} label="Related articles graph">
+          <IconGraph />
+        </IBtn>
+        <IBtn onPress={() => setShowOverflow(v => !v)} label="More options">
           <IconDots />
         </IBtn>
       </View>
       </GestureDetector>
 
-      {/* ── Overflow menu ── */}
+      {/* ── Overflow menu: the rarer actions ── */}
       {showOverflow && (
         <>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowOverflow(false)} />
-          <View style={[styles.overflow, { top: insets.top + 52 }]}>
-            <TouchableOpacity style={styles.overflowItem} onPress={() => { handleBookmark(); setShowOverflow(false); }}>
-              <IconBookmark active={bookmarked} />
-              <Text style={styles.overflowLabel}>{bookmarked ? 'Bookmarked' : 'Bookmark'}</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="Dismiss" style={StyleSheet.absoluteFill} onPress={() => setShowOverflow(false)} />
+          <View style={[styles.overflow, { top: insets.top + 56 }]}>
+            <TouchableOpacity
+              style={styles.overflowItem}
+              accessibilityRole="menuitem"
+              onPress={() => { setShowOverflow(false); nav.popTo('Home', { openSearch: true }); }}
+            >
+              <IconSearch />
+              <Text style={styles.overflowLabel}>Search the Encyclopedia</Text>
             </TouchableOpacity>
             <View style={styles.overflowSep} />
-            <TouchableOpacity style={styles.overflowItem} onPress={() => { handleShare(); setShowOverflow(false); }}>
+            <TouchableOpacity
+              style={styles.overflowItem}
+              accessibilityRole="menuitem"
+              onPress={() => { handleShare(); setShowOverflow(false); }}
+            >
               <IconShare />
               <Text style={styles.overflowLabel}>Share</Text>
-            </TouchableOpacity>
-            <View style={styles.overflowSep} />
-            <TouchableOpacity style={styles.overflowItem} onPress={() => { setShowOverflow(false); nav.navigate('Graph', { centerSlug: slug, centerTitle: displayTitle }); }}>
-              <IconGraph />
-              <Text style={styles.overflowLabel}>View graph</Text>
             </TouchableOpacity>
           </View>
         </>
@@ -715,7 +748,7 @@ export default function ArticleScreen() {
       {/* ── Loading states ── */}
       {(state.phase === 'loading' || state.phase === 'fetching') && (
         <View style={styles.center}>
-          <ActivityIndicator color="#5b8ef5" size="large" />
+          <ActivityIndicator color={colors.accent} size="large" />
           {state.phase === 'fetching' && (
             <Text style={styles.fetchingLabel}>Loading article…</Text>
           )}
@@ -724,7 +757,7 @@ export default function ArticleScreen() {
       {state.phase === 'error' && (
         <View style={styles.center}>
           <Text style={styles.errorText}>{state.message}</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={() => load()}>
+          <TouchableOpacity accessibilityRole="button" style={styles.retryBtn} onPress={() => load()}>
             <Text style={styles.retryLabel}>Retry</Text>
           </TouchableOpacity>
         </View>
@@ -741,7 +774,6 @@ export default function ArticleScreen() {
               onResolved={(ids) => {
                 setOrphaned(prev => prev.filter(a => !ids.includes(a.id)));
                 getAnnotationsForSlug(slug).then(all => {
-                  const hash = entryContentHash;
                   const valid = all.filter(a => (state.entry.content_html ?? '').includes(a.selected_text));
                   setAnnotations(valid);
                   injectAnnotations(valid);
@@ -754,15 +786,16 @@ export default function ArticleScreen() {
           <View style={styles.webWrap}>
             {!webReady && !USE_NATIVE_RENDERER && (
               <View style={styles.webOverlay}>
-                <ActivityIndicator color="#5b8ef5" />
+                <ActivityIndicator color={colors.accent} />
               </View>
             )}
             {USE_NATIVE_RENDERER && !nativeArticle && (
               <View style={styles.webOverlay}>
-                <ActivityIndicator color="#5b8ef5" />
+                <ActivityIndicator color={colors.accent} />
               </View>
             )}
             {USE_NATIVE_RENDERER && nativeArticle ? (
+              <SepThemeProvider base={readerFont}>
               <SepArticle
                 ref={nativeArticleRef}
                 article={nativeArticle}
@@ -802,7 +835,7 @@ export default function ArticleScreen() {
                   <FallbackBlock html={html} baseUrl={`${SEP_BASE}/entries/${slug}/`} />
                 )}
                 footer={backlinkCount > 0 ? (
-                  <TouchableOpacity
+                  <TouchableOpacity accessibilityRole="button"
                     style={styles.backlinksRow}
                     onPress={() => nav.navigate('Graph', { centerSlug: slug, centerTitle: displayTitle })}
                   >
@@ -811,6 +844,7 @@ export default function ArticleScreen() {
                   </TouchableOpacity>
                 ) : null}
               />
+              </SepThemeProvider>
             ) : (
             <WebView
               ref={webRef}
@@ -833,7 +867,9 @@ export default function ArticleScreen() {
             <GestureDetector gesture={tocSwipe}>
               <Pressable
                 style={[styles.tocHandle, { bottom: insets.bottom }]}
-                onPress={() => setShowToc(true)}
+                onPress={openToc}
+                accessibilityRole="button"
+                accessibilityLabel="Open contents"
                 hitSlop={{ top: 10, bottom: 10, left: 40, right: 40 }}
               >
                 <View style={styles.tocHandlePill} />
@@ -857,14 +893,16 @@ export default function ArticleScreen() {
 
       {/* ── Footnote sheet — slides up in the TOC-modal style ── */}
       {footnote && (
-        <FootnoteSheet inlines={footnote.inlines} onClose={() => setFootnote(null)} />
+        <SepThemeProvider base={readerFont}>
+          <FootnoteSheet inlines={footnote.inlines} onClose={() => setFootnote(null)} />
+        </SepThemeProvider>
       )}
 
       {/* ── Link preview peek card ── */}
       {linkPreview && (
         <>
-          <Pressable style={styles.lpBackdrop} onPress={() => setLinkPreview(null)} />
-          <View style={[styles.lpCard, { bottom: insets.bottom + 28 }]}>
+          <Pressable accessibilityRole="button" style={styles.lpBackdrop} onPress={() => setLinkPreview(null)} />
+          <View accessibilityViewIsModal style={[styles.lpCard, { bottom: insets.bottom + 28 }]}>
             <Text style={styles.lpTitle} numberOfLines={2}>{linkPreview.title}</Text>
             {linkPreview.author ? (
               <Text style={styles.lpAuthor} numberOfLines={1}>{linkPreview.author}</Text>
@@ -879,7 +917,7 @@ export default function ArticleScreen() {
                 {linkPreview.excerpt ?? 'Not yet downloaded — open to read.'}
               </Text>
             </ScrollView>
-            <TouchableOpacity
+            <TouchableOpacity accessibilityRole="button"
               style={styles.lpBtn}
               onPress={() => { const t = linkPreview.slug; setLinkPreview(null); navToEntry(t); }}
               activeOpacity={0.8}
@@ -904,30 +942,30 @@ export default function ArticleScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#111' },
+const styles = themedStyles(() => themedStyles(() => StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
 
   // ── Link preview peek card ──
   lpBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)', zIndex: 200 },
   lpCard: {
     position: 'absolute', left: 16, right: 16, zIndex: 201,
-    backgroundColor: '#1c1c1c', borderRadius: 12,
-    borderWidth: 1, borderColor: '#2e2e2e', padding: 16,
+    backgroundColor: colors.surface, borderRadius: 12,
+    borderWidth: 1, borderColor: colors.border, padding: 16,
     shadowColor: '#000', shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.5, shadowRadius: 16, elevation: 12,
   },
-  lpTitle: { color: '#e4e4e4', fontSize: 17, fontWeight: '700', lineHeight: 22 },
-  lpAuthor: { color: '#555', fontSize: 12, marginTop: 4 },
+  lpTitle: { color: colors.text, fontSize: 17, fontWeight: '700', lineHeight: 22 },
+  lpAuthor: { color: colors.textMuted, fontSize: 12, marginTop: 4 },
   lpScroll: { maxHeight: 300, marginTop: 10 },
   lpScrollContent: { paddingBottom: 2 },
-  lpExcerpt: { color: '#9a9a9a', fontSize: 13, lineHeight: 19 },
+  lpExcerpt: { color: colors.textMuted, fontSize: 13, lineHeight: 19 },
   lpBtn: {
     alignSelf: 'flex-start', marginTop: 14,
     paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8,
     backgroundColor: 'rgba(91,142,245,0.14)',
     borderWidth: 1, borderColor: 'rgba(91,142,245,0.35)',
   },
-  lpBtnText: { color: '#5b8ef5', fontSize: 14, fontWeight: '600' },
+  lpBtnText: { color: colors.accent, fontSize: 14, fontWeight: '600' },
 
   appBar: {
     flexDirection: 'row',
@@ -935,21 +973,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     paddingBottom: 4,
     borderBottomWidth: 1,
-    borderBottomColor: '#222222',
+    borderBottomColor: colors.borderSubtle,
   },
   iBtn: {
-    width: 42, height: 42,
+    width: 48, height: 48,
     alignItems: 'center', justifyContent: 'center',
-    borderRadius: 21,
+    borderRadius: 24,
   },
 
   overflow: {
     position: 'absolute',
     right: 8,
-    backgroundColor: '#252525',
+    backgroundColor: colors.elevated,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#2e2e2e',
+    borderColor: colors.border,
     zIndex: 100,
     minWidth: 160,
     shadowColor: '#000',
@@ -965,27 +1003,30 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     paddingHorizontal: 14,
   },
-  overflowLabel: { fontSize: 14, color: '#d0d0d0' },
-  overflowSep: { height: StyleSheet.hairlineWidth, backgroundColor: '#2e2e2e', marginHorizontal: 12 },
+  overflowLabel: { fontSize: 14, color: colors.textSecondary },
+  overflowSep: { height: StyleSheet.hairlineWidth, backgroundColor: colors.fillMuted, marginHorizontal: 12 },
 
+
+  // Mockup-spec styles kept for the ART-xx audit (__tests__/mockup/article.test.ts);
+  // the live header is ArticleHeader.
   articleHeader: {
     paddingHorizontal: 18,
     paddingTop: 22,
     paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#222222',
+    borderBottomColor: colors.borderSubtle,
   },
   articleCategory: {
     fontSize: 11, fontWeight: '600',
     letterSpacing: 0.08 * 11,
     textTransform: 'uppercase',
-    color: '#5b8ef5',
+    color: colors.accent,
     marginBottom: 8,
   },
   articleTitle: {
     fontSize: 26, fontWeight: '700',
     lineHeight: 31, letterSpacing: -0.02 * 26,
-    color: '#e4e4e4',
+    color: colors.text,
     marginBottom: 12,
   },
   articleMeta: {
@@ -994,8 +1035,8 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 6,
   },
-  articleMetaText: { fontSize: 12, color: '#555' },
-  articleMetaDot: { fontSize: 12, color: '#333' },
+  articleMetaText: { fontSize: 12, color: colors.textMuted },
+  articleMetaDot: { fontSize: 12, color: colors.textMuted },
   annChip: {
     marginLeft: 'auto' as any,
     flexDirection: 'row',
@@ -1008,9 +1049,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(91,142,245,0.35)',
   },
-  annChipText: { fontSize: 11, fontWeight: '500', color: '#5b8ef5' },
-
-  webWrap: { flex: 1, position: 'relative' },
+  annChipText: { fontSize: 11, fontWeight: '500', color: colors.accent },
   edgeAccent: {
     position: 'absolute',
     left: 0, top: 0, bottom: 0,
@@ -1018,10 +1057,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(91,142,245,0.25)',
     zIndex: 5,
   } as any,
-  web: { flex: 1, backgroundColor: '#111' },
+
+  webWrap: { flex: 1, position: 'relative' },
+  web: { flex: 1, backgroundColor: colors.bg },
   webOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#111',
+    backgroundColor: colors.bg,
     alignItems: 'center', justifyContent: 'center', zIndex: 10,
   },
 
@@ -1036,7 +1077,7 @@ const styles = StyleSheet.create({
   },
   tocHandlePill: {
     width: 40, height: 4,
-    backgroundColor: '#555',
+    backgroundColor: colors.fillMuted,
     borderRadius: 2,
   },
 
@@ -1049,12 +1090,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#262626',
-    backgroundColor: '#161616',
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.surface,
   },
-  backlinksLabel: { color: '#5b8ef5', fontSize: 14, fontWeight: '600' },
+  backlinksLabel: { color: colors.accent, fontSize: 14, fontWeight: '600' },
   backlinksBadge: {
-    color: '#9a9a9a',
+    color: colors.textMuted,
     fontSize: 13,
     fontWeight: '600',
     minWidth: 22,
@@ -1062,13 +1103,13 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
     paddingHorizontal: 7,
     borderRadius: 10,
-    backgroundColor: '#222',
+    backgroundColor: colors.elevated,
     overflow: 'hidden',
   },
 
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
-  fetchingLabel: { color: '#555', fontSize: 14 },
-  errorText: { color: '#888', fontSize: 15, textAlign: 'center', paddingHorizontal: 32 },
-  retryBtn: { paddingVertical: 10, paddingHorizontal: 24, borderRadius: 8, borderWidth: 1, borderColor: '#333' },
-  retryLabel: { color: '#5b8ef5', fontSize: 15 },
-});
+  fetchingLabel: { color: colors.textMuted, fontSize: 14 },
+  errorText: { color: colors.textMuted, fontSize: 15, textAlign: 'center', paddingHorizontal: 32 },
+  retryBtn: { paddingVertical: 10, paddingHorizontal: 24, borderRadius: 8, borderWidth: 1, borderColor: colors.border },
+  retryLabel: { color: colors.accent, fontSize: 15 },
+})));

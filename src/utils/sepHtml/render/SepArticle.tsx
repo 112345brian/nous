@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ParsedArticle, Block } from '../types';
 import type { Annotation } from '../../../types';
 import { BlockView, type BlockHandlers } from './Blocks';
-import { SEP_COLORS, SEP_SIDE_PAD } from './theme';
+import { SEP_COLORS, SEP_SIDE_PAD, useSepTheme } from './theme';
 
 export interface SepArticleProps {
   article: ParsedArticle;
@@ -40,6 +40,7 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
   resolveImageSrc, annotations, onAnnotationPress, onAnnotationCreate, header, footer, mathSvgs,
 }, ref) {
   const { bottom: bottomInset } = useSafeAreaInsets();
+  const { measure } = useSepTheme();
   const flatListRef = useRef<FlatList<Block>>(null);
   const headingOffsets = useRef<Map<string, number>>(new Map());
   const lastProgress = useRef(0);
@@ -132,7 +133,11 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
       renderItem={renderBlock}
       keyExtractor={keyExtractor}
       style={{ backgroundColor: SEP_COLORS.bg }}
-      contentContainerStyle={{ paddingHorizontal: SEP_SIDE_PAD, paddingTop: 16, paddingBottom: 96 + bottomInset }}
+      contentContainerStyle={{
+        paddingHorizontal: SEP_SIDE_PAD, paddingTop: 16, paddingBottom: 96 + bottomInset,
+        // Cap the line length so wide windows (tablet, macOS, landscape) stay readable.
+        width: '100%', maxWidth: measure + SEP_SIDE_PAD * 2, alignSelf: 'center',
+      }}
       onScroll={handleScroll}
       scrollEventThrottle={32}
       ListHeaderComponent={listHeader}

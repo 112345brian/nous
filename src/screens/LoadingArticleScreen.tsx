@@ -1,6 +1,7 @@
 import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { APP_ACCENT } from '../utils/sepHtml/render/theme';
+import { colors, themedStyles } from '../theme/tokens';
 
 interface Props {
   phase: 'booting' | 'indexing' | 'index_error';
@@ -21,10 +22,10 @@ export default function LoadingArticleScreen({ phase }: Props) {
   );
 }
 
-const s = StyleSheet.create({
+const s = themedStyles(() => themedStyles(() => StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#111',
+    backgroundColor: colors.bg,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 32,
@@ -36,9 +37,9 @@ const s = StyleSheet.create({
     letterSpacing: 6,
   },
   error: {
-    color: '#666',
+    color: colors.textMuted,
     fontSize: 13,
     textAlign: 'center',
     lineHeight: 20,
   },
-});
+})));
