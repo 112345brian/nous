@@ -1,6 +1,7 @@
 import * as SQLite from 'expo-sqlite';
 import type { EntryRow, EntrySummary, ReadRow, ReadNode, Session, Annotation } from '../types';
 import { makeExcerpt } from '../utils/excerpt';
+import { mathTierStamp, TIERED_MATH_DEFAULT } from '../utils/mathTier';
 
 let _db: SQLite.SQLiteDatabase | null = null;
 
@@ -155,6 +156,25 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       `INSERT OR REPLACE INTO meta (key, value) VALUES ('ast_parser_version', ?)`,
       [PARSER_VERSION]
     );
+  }
+
+  // Tiered math: which math pipeline produced the cached articles. When the
+  // effective on/off state or MATH_TIER_VERSION changes, clear cached article
+  // content so everything re-fetches and re-processes (same idea as above).
+  // The `tiered_math` meta pref ('1'/'0') overrides TIERED_MATH_DEFAULT.
+  const tierPref = await db.getFirstAsync<{ value: string }>(`SELECT value FROM meta WHERE key = 'tiered_math'`);
+  const tierStamp = mathTierStamp(tierPref ? tierPref.value === '1' : TIERED_MATH_DEFAULT);
+  const tierSeen = await db.getFirstAsync<{ value: string }>(`SELECT value FROM meta WHERE key = 'math_tier_stamp'`);
+  if (tierSeen?.value !== tierStamp) {
+    if (tierSeen) {
+      // Only clear when something was cached under a previous stamp.
+      await db.runAsync(
+        `UPDATE entries SET content_html = NULL, preamble_html = NULL, toc_html = NULL, notes_html = NULL,
+         content_ast = NULL, excerpt = NULL, cached_at = NULL WHERE cached_at IS NOT NULL`
+      );
+      await db.runAsync(`DELETE FROM meta WHERE key IN ('math_pending', 'math_inline_v2', 'math_hash_format_v1')`);
+    }
+    await db.runAsync(`INSERT OR REPLACE INTO meta (key, value) VALUES ('math_tier_stamp', ?)`, [tierStamp]);
   }
 
   // Migrate FTS from content-table to standalone if needed, then ensure it exists

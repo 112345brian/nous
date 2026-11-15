@@ -10,6 +10,15 @@
 // whose characters have no Unicode script form makes the whole equation fall
 // back to MathJax.
 
+// Tiering is applied to every article when on. Bump MATH_TIER_VERSION whenever
+// the classifier output changes: db init clears cached article content when the
+// stamp (see mathTierStamp) differs, so articles re-fetch and re-process.
+export const TIERED_MATH_DEFAULT = false;
+export const MATH_TIER_VERSION = 1;
+export function mathTierStamp(enabled: boolean): string {
+  return enabled ? `on:${MATH_TIER_VERSION}` : 'off';
+}
+
 export type TierResult = { ok: true; html: string } | { ok: false; reason: string };
 
 const MAX_LEN = 120;

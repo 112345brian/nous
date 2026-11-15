@@ -4,7 +4,7 @@ import seedEntries from '../assets/entry-seed.json';
 import { renderMathBatch } from './mathRender';
 import { parseSepHtml } from '../utils/sepHtml/parse';
 import { perf } from '../utils/perf';
-import { classifySimpleTex } from '../utils/mathTier';
+import { classifySimpleTex, TIERED_MATH_DEFAULT } from '../utils/mathTier';
 
 // 64-bit hash of a TeX equation (or SVG bytes) + display flag. Two independent
 // djb2-xor passes with different seeds; birthday collision at ~2^32 unique inputs
@@ -27,9 +27,9 @@ function mathHash(input: string, display: boolean): string {
 const MATH_SUBST_RE = /\\\(([\s\S]*?)\\\)|\\\[([\s\S]*?)\\\]/g;
 // Tiered math flag. Default OFF until verified on a device. Enable by setting the
 // `tiered_math` meta pref to '1' (setMeta('tiered_math', '1')) or flipping the
-// constant. Only affects articles processed after it is on; cached articles are
-// never rewritten (docs/tiered-math.md).
-export const TIERED_MATH_DEFAULT = false;
+// constant (mathTier.ts). Applies to every article; db init clears cached
+// content when the on/off state or MATH_TIER_VERSION changes, so articles
+// re-fetch and re-process on next launch (docs/tiered-math.md).
 async function tieredMathEnabled(): Promise<boolean> {
   try {
     const v = await getMeta('tiered_math');

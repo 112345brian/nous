@@ -37,26 +37,28 @@ bare `{}` groups, nested scripts, double scripts, script without base, unbalance
 non-ASCII or control chars, empty/over-long input, display math, non-strings. The entry point wraps the
 analysis in try/catch → `null`. Tests loop 5,000 random strings and require no throw and escaped output.
 
-## Cached articles — decision: do NOT rewrite
-Tiering applies only to articles processed after the flag is on. Facts from the code:
-- `entries.content_hash` is set in `cacheArticle` from the HTML passed then, and `updateArticleHtml`
-  (used when deferred math completes) does not touch it. So deferred math, SVG or tiered, never
-  changes the hash; annotations with a matching hash stay valid.
-- On the `awaitMath` path the hash is of the already-substituted HTML, so toggling the flag and
-  re-fetching changes the hash; `partitionAnnotations` then falls back to `html.includes(selected_text)`.
-- That fallback is a raw HTML substring match. A selection spanning an equation fails with `<math-i>`
-  *and* with `<em>` markup alike; text next to equations matches in both. Tests cover both.
-- Backfill risks: text offsets of highlights inside the article shift (equation text now exists in
-  the flow), and a cached article would flip between SVG and text mid-reading. Safe path if wanted later:
-  a meta-guarded one-shot like `backfillMathInline`, run only for articles with zero annotations
-  (check the `annotations` table first), re-deriving from fetched TeX — which cached `<math-i>` no longer
-  contains, so it needs a re-fetch. Not implemented.
-- `backfillMathInline` (legacy articles still holding raw TeX) goes through `substitutemath`, so with the flag on
-  those get tiered too; they are being rewritten anyway.
+## Existing cached articles — re-derive, no backfill
+The app is prerelease (no users, no old articles or annotations to preserve), so there is one code path:
+tiering applies to **every** article when the flag is on. There is no "new articles only" mode and no backfill.
+- `db.ts` `initSchema` records `math_tier_stamp` = `off` or `on:<MATH_TIER_VERSION>` (`mathTier.ts`).
+  When the effective state differs from the stored stamp (flag flipped, or `MATH_TIER_VERSION` bumped because the
+  classifier output changed), cached article content (html, ast, toc, preamble, notes, excerpt, `cached_at`) is
+  cleared and `math_pending` / math backfill flags are dropped, so articles re-fetch and re-process. Same pattern as
+  `ast_parser_version`. First run only records the stamp; nothing is cleared.
+- The `tiered_math` meta pref overrides `TIERED_MATH_DEFAULT`; a change takes effect (and clears) on the next launch.
+  Bump `MATH_TIER_VERSION` whenever the whitelist or emitted markup changes.
+- `content_hash` is set by `cacheArticle` from the HTML it is given and not changed by deferred math. Re-fetching
+  gives a new hash, so annotations made before are checked by `partitionAnnotations` and, if orphaned, re-anchored.
 
-## How to enable
-Runtime: `await setMeta('tiered_math', '1')` (`'0'` forces off). Default: `TIERED_MATH_DEFAULT` in `catalog.ts`.
-Takes effect for the next processed article.
+### Annotations
+- Annotations must still survive a real SEP revision (orphan/re-anchor logic unchanged except one addition below).
+- A selection that spans tiered math has rendered text (`Then x₁ holds`). The stored HTML has `<em>x</em>₁`, so the
+  raw substring scan and the old re-anchor missed it. `tryReanchor` now retries against the tag-stripped,
+  entity-decoded HTML when the raw attempt fails. Covered in `tieredMath.test.ts` (revision re-anchors; changed text
+  still orphans).
+- A complex (SVG) equation has no selectable text: it contributes nothing to `selected_text`, so the anchor is the
+  text on either side, and a revision that replaces the equation in place is not noticed. The obvious stable anchor is
+  the TeX source (or its `mathHash`) stored with the annotation; **not built** (it needs selection to know the equation).
 
 ## Measured coverage (counts only; fetched pages kept outside the repo)
 `node scripts/mathTierCoverage.cjs <dir>` on pages fetched from plato.stanford.edu (logic-classical,

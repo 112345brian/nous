@@ -39,6 +39,7 @@ jest.mock('../mathRender', () => ({
 import * as db from '../db';
 import { completeArticleMath } from '../catalog';
 import { partitionAnnotations } from '../../utils/annotationValidity';
+import { reanchorAll } from '../../utils/reanchor';
 
 const T = '\u2009';
 const okRender = async (items: Array<{ tex: string; display: boolean }>) =>
@@ -114,25 +115,33 @@ describe('flag ON (meta tiered_math=1)', () => {
 describe('annotations vs tiered text', () => {
   const before = '<p>Then <math-i hash="h" d="0" w="1" h="1"></math-i> holds for every set.</p>';
   const after = `<p>Then <em>x</em>₁ holds for every set.</p>`;
-  const anns = [
-    { content_hash: 'old', selected_text: 'holds for every set' },
-    { content_hash: 'old', selected_text: 'Then x₁ holds' }, // spans the equation
-    { content_hash: 'cur', selected_text: 'Then x₁ holds' },
-  ];
-  test('hash match: unaffected, because substitution does not change entries.content_hash', () => {
-    const r = partitionAnnotations(anns.slice(2), 'cur', () => { throw new Error('no scan needed'); });
+  test('hash match: valid without scanning', () => {
+    const r = partitionAnnotations([{ content_hash: 'cur', selected_text: 'Then x₁ holds' }], 'cur',
+      () => { throw new Error('no scan needed'); });
     expect(r.valid).toHaveLength(1);
   });
-  test('stale-hash scan: text beside an equation matches in both forms', () => {
+  test('text beside an equation matches either form', () => {
     for (const html of [before, after]) {
-      expect(partitionAnnotations([anns[0]], 'cur', () => html).valid).toHaveLength(1);
+      expect(partitionAnnotations([{ content_hash: 'old', selected_text: 'holds for every set' }], 'cur', () => html).valid).toHaveLength(1);
     }
   });
-  test('stale-hash scan: a selection spanning an equation is not found in either form', () => {
-    // The scan is a raw substring match against HTML, so <em> markup already
-    // breaks it; tiering does not make this worse than <math-i>.
-    for (const html of [before, after]) {
-      expect(partitionAnnotations([anns[1]], 'cur', () => html).stale).toHaveLength(1);
-    }
+  test('a selection spanning tiered math survives an article revision (re-anchors)', () => {
+    // Made after tiering: selected_text is the rendered text, spanning <em>x</em>₁.
+    const ann = { id: 1, content_hash: 'old', selected_text: 'Then x₁ holds', context: 'Then x₁ holds for every set.' };
+    const revised = '<p>In the revised text, then <em>x</em>₁ holds for every set, always.</p>'.replace('then', 'Then');
+    // The substring scan misses it (HTML markup in between) -> orphaned ...
+    expect(partitionAnnotations([ann], 'cur', () => revised).stale).toHaveLength(1);
+    // ... and the re-anchor step, which sees through inline tags, finds it.
+    const [res] = reanchorAll([ann as any], revised);
+    expect(res.found).toBe(true);
+    // Text that really changed still orphans.
+    expect(reanchorAll([ann as any], '<p>Nothing alike here at all.</p>')[0].found).toBe(false);
+  });
+  test('a complex (SVG) equation has no selectable text: the anchor is the surrounding text only', () => {
+    // The equation contributes nothing to selected_text, so re-anchoring matches
+    // the text on either side (tags stripped, whitespace collapsed) and cannot
+    // tell WHICH equation sat in the gap. TeX-source anchoring is not built.
+    const ann = { id: 2, content_hash: 'old', selected_text: 'Then holds', context: null };
+    expect(reanchorAll([ann as any], before)[0].found).toBe(true);
   });
 });
