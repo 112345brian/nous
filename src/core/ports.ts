@@ -1,4 +1,4 @@
-import type { IndexEntry } from '../types';
+import type { EntryRow, IndexEntry } from '../types';
 
 // Ports: the outward-facing interfaces the core needs. Plain TypeScript only.
 //
@@ -50,10 +50,43 @@ export interface KeyValueStore {
   setMeta(key: string, value: string): Promise<void>;
 }
 
-/** Where SEP pages come from. Grows as more use cases are converted (article page, notes page). */
+/** Where SEP pages come from. */
 export interface ArticleSource {
   /** Raw HTML of the SEP table of contents (contents.html). Rejects when it cannot be read. */
   fetchIndexHtml(): Promise<string>;
+  /**
+   * Raw HTML of an entry page, or null when the site answered with an error status.
+   * Rejects on a network failure or timeout.
+   */
+  fetchArticleHtml(slug: string): Promise<string | null>;
+  /** The footnotes of an entry (body of its notes page), or null when there are none to use. Never rejects. */
+  fetchNotesHtml(slug: string): Promise<string | null>;
+}
+
+/** What an article row stores when it is cached. */
+export type CachedArticleFields =
+  Pick<EntryRow, 'author' | 'pub_date' | 'toc_html' | 'preamble_html' | 'content_html' | 'content_ast' | 'has_math'>
+  & { notes_html?: string | null };
+
+/** The slice of the local library the article-caching use case writes to. */
+export interface ArticleLibrary {
+  cacheArticle(slug: string, data: CachedArticleFields): Promise<void>;
+  /** Record which entries `contentHtml` links to (feeds the backlinks and the graph). */
+  indexLinks(slug: string, contentHtml: string): Promise<void>;
+}
+
+/** Turns TeX in an article into stored SVG equations. */
+export interface ArticleMath {
+  /** Render every equation in `html` now; resolves to the HTML with <math-i> references. */
+  substitute(html: string): Promise<string>;
+  /** Render this cached article's equations in the background and rewrite it when done. Does not wait. */
+  completeLater(slug: string, html: string): void;
+}
+
+/** Dev-only stage timing; structurally the same as `Perf` in utils/perf.ts. */
+export interface StageTimer {
+  time<T>(key: string, stage: string, fn: () => Promise<T>): Promise<T>;
+  timeSync<T>(key: string, stage: string, fn: () => T): T;
 }
 
 /** The slice of the local library the index refresh needs. */

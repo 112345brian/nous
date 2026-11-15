@@ -5,8 +5,9 @@ import { renderMathBatch } from './mathRender';
 import { parseSepHtml } from '../utils/sepHtml/parse';
 import { mathHash } from '../utils/mathHash';
 import { refreshIndexIfStale as refreshIndexUseCase } from '../core/refreshIndex';
+import { fetchAndCacheArticle as cacheArticleUseCase, type CacheArticleDeps } from '../core/cacheArticle';
 import type { IndexEntry } from '../types';
-import { extractById, extractMetaContent, extractTitle, extractAuthor, decodeEntities } from '../utils/sepPage';
+import { extractById, decodeEntities } from '../utils/sepPage';
 import { perf } from './perf';
 
 // Replace all \(…\) and \[…\] TeX math in the raw HTML with compact <math-i>
@@ -310,65 +311,42 @@ export async function syncCachedArticles(
 //   awaitMath      — render equations first (old behavior); for bulk sync where
 //                    nobody is waiting on the first paint.
 //   skipMath       — leave raw TeX; bulk download defers to backfillMathInline.
-export async function fetchAndCacheArticle(
+export function fetchAndCacheArticle(
   slug: string,
   opts: { skipMath?: boolean; awaitMath?: boolean } = {},
 ): Promise<boolean> {
+  return cacheArticleUseCase(articleDeps(), slug, opts);
+}
+
+// Adapters for the use case in src/core/cacheArticle.ts.
+function articleDeps(): CacheArticleDeps {
+  return {
+    source: { fetchArticleHtml, fetchNotesHtml },
+    library: { cacheArticle, indexLinks },
+    math: { substitute: substitutemath, completeLater },
+    timing: perf,
+    linkify: linkifyHtml,
+  };
+}
+
+// Rejects on a network failure or timeout; null when the site answers with an error status.
+async function fetchArticleHtml(slug: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30_000);
+  let res: Response;
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30_000);
-    let res: Response;
-    try {
-      res = await perf.time(slug, 'fetch', () => fetch(`${BASE}/entries/${slug}/`, { headers: SEP_HEADERS, signal: controller.signal }));
-    } finally {
-      clearTimeout(timer);
-    }
-    if (!res.ok) return false;
-    const html = await perf.time(slug, 'fetch-body', () => res.text());
-
-    const { title, tocHtml, preambleHtml, rawContentHtml } = perf.timeSync(slug, 'extract', () => ({
-      title: extractTitle(html) ?? slug,
-      tocHtml: extractById(html, 'toc'),
-      preambleHtml: extractById(html, 'preamble'),
-      rawContentHtml: extractById(html, 'aueditable') || extractById(html, 'article-content'),
-    }));
-
-    if (!rawContentHtml) return false;
-
-    // aueditable starts with <h1> (title) which the template re-adds itself.
-    const contentHtml = rawContentHtml.replace(/^\s*<!--[^>]*-->\s*/, '').replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/i, '');
-
-    const linkedHtml = perf.timeSync(slug, 'linkify', () => linkifyHtml(contentHtml));
-    const hasMath = linkedHtml.includes('\\(') || linkedHtml.includes('\\[');
-    // Substitute math unless caller opted out (bulk download defers to backfillMathInline).
-    const deferMath = hasMath && !opts.skipMath && !opts.awaitMath;
-    const finalHtml = hasMath && !opts.skipMath && opts.awaitMath ? await perf.time(slug, 'math', () => substitutemath(linkedHtml)) : linkedHtml;
-    // Footnote text lives on a sibling notes.html page; fetch it so footnotes
-    // resolve offline. Only when the body actually references it.
-    const notesHtml = /notes\.html#note/i.test(finalHtml) ? await perf.time(slug, 'notes', () => fetchNotesHtml(slug)) : null;
-    // Pre-parse the AST so ArticleScreen can JSON.parse instead of re-parsing HTML.
-    const content_ast = perf.timeSync(slug, 'parse+stringify', () => JSON.stringify(parseSepHtml(finalHtml)));
-    await perf.time(slug, 'cache-write', () => cacheArticle(slug, {
-      author: extractMetaContent(html, 'citation_author') ?? extractAuthor(html),
-      pub_date: extractMetaContent(html, 'citation_publication_date'),
-      toc_html: tocHtml,
-      preamble_html: preambleHtml,
-      content_html: finalHtml,
-      notes_html: notesHtml,
-      content_ast,
-      has_math: hasMath ? 1 : 0,
-    }));
-    // Index outgoing links for graph view
-    indexLinks(slug, contentHtml).catch(() => {});
-    if (deferMath) {
-      // Fire-and-forget: record the debt first so a kill mid-render resumes at
-      // next launch, then render. Errors stay inside completeArticleMath.
-      updatePending(s => { s.add(slug); }).then(() => completeArticleMath(slug, finalHtml));
-    }
-    return true;
-  } catch {
-    return false;
+    res = await perf.time(slug, 'fetch', () => fetch(`${BASE}/entries/${slug}/`, { headers: SEP_HEADERS, signal: controller.signal }));
+  } finally {
+    clearTimeout(timer);
   }
+  if (!res.ok) return null;
+  return perf.time(slug, 'fetch-body', () => res.text());
+}
+
+// Record the debt first so a kill mid-render resumes at next launch, then render.
+// Errors stay inside updatePending / completeArticleMath.
+function completeLater(slug: string, html: string): void {
+  updatePending(s => { s.add(slug); }).then(() => completeArticleMath(slug, html));
 }
 
 async function fetchIndexHtml(): Promise<string> {
