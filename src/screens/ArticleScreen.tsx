@@ -11,13 +11,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import {
-  getEntry, getEntryHtml, getEntryPreview, recordRead, toggleBookmark, isBookmarked,
-  saveAnnotation, updateAnnotation, deleteAnnotation, getAnnotationsForSlug,
-  getMeta, setReadProgress, getLinksTo, indexLinks, getRecentSlugs, getMathSvgMap,
-} from '../services/db';
 import { makeExcerpt } from '../utils/excerpt';
-import { fetchAndCacheArticle, onMathReady, ensureNotesCached, startPrefetch, idleScheduler } from '../composition';
+import {
+  onMathReady, ensureNotesCached, startPrefetch, idleScheduler, loadArticleData,
+  libraryRead, readerState, bookmarkStore, annotationStore, metaStore,
+} from '../composition';
 import { perf } from '../services/perf';
 import { primeBackfillForSlugs, primeGraphLayouts } from '../services/inpho';
 import { buildArticleHtml } from '../utils/articleTemplate';
@@ -25,8 +23,8 @@ import { parseSepHtml } from '../utils/sepHtml/parse';
 import { collectMathHashes } from '../utils/sepHtml/collectMathHashes';
 import { SepArticle, type SepArticleHandle } from '../utils/sepHtml/render/SepArticle';
 import { ArticleHeader } from '../utils/sepHtml/render/ArticleHeader';
-import { springTo } from '../utils/motion';
-import { useBackDismiss } from '../utils/useBackDismiss';
+import { springTo } from '../ui/motion';
+import { useBackDismiss } from '../ui/useBackDismiss';
 import { SepThemeProvider, parseReaderFontSize, DEFAULT_READER_FONT } from '../utils/sepHtml/render/theme';
 import type { Inline } from '../utils/sepHtml/types';
 import AnnotationModal from '../components/AnnotationModal';
@@ -35,8 +33,7 @@ import FootnoteSheet from '../components/FootnoteSheet';
 import { parseToc } from '../utils/parseToc';
 import OrphanedAnnotationsBanner from '../components/OrphanedAnnotationsBanner';
 import type { EntryRow, Annotation } from '../types';
-import { resolveEntryHash } from '../services/db';
-import { partitionAnnotations } from '../utils/annotationValidity';
+import { resolveEntryHash } from '../utils/entryHash';
 import type { RootStackParamList } from '../../App';
 import { colors, themedStyles } from '../theme/tokens';
 
@@ -216,7 +213,7 @@ export default function ArticleScreen() {
   // a change made in Settings applies when the reader is returned to.
   const [readerFont, setReaderFont] = useState(DEFAULT_READER_FONT);
   useEffect(() => {
-    const refresh = () => getMeta('font_size').then(v => setReaderFont(parseReaderFontSize(v))).catch(() => {});
+    const refresh = () => metaStore.getMeta('font_size').then(v => setReaderFont(parseReaderFontSize(v))).catch(() => {});
     refresh();
     return nav.addListener('focus', refresh);
   }, [nav]);
@@ -248,7 +245,7 @@ export default function ArticleScreen() {
     // Effects run after commit, so this is when SepArticle's first frame was handed to the renderer.
     perf.mark(slug, 'first-render');
     if (!hashes.length) { perf.end(slug); return; }
-    perf.time(slug, 'math-svg-map', () => getMathSvgMap(hashes)).then(setMathSvgs).catch(() => {}).finally(() => perf.end(slug));
+    perf.time(slug, 'math-svg-map', () => libraryRead.getMathSvgMap(hashes)).then(setMathSvgs).catch(() => {}).finally(() => perf.end(slug));
   }, [nativeArticle, slug]);
 
   // Key on content strings (primitives) rather than the entry object so the
@@ -299,7 +296,7 @@ export default function ArticleScreen() {
         // wait for a quiet gap (and for any article open/download hold to end).
         await idleScheduler.whenMayRun('current');
         if (stale) return; // navigated away while waiting
-        const e = await getEntry(slug);
+        const e = await libraryRead.getEntry(slug);
         if (!stale && e?.content_ast) setNativeArticle(JSON.parse(e.content_ast));
       } catch { /* keep showing the text-only version */ }
     });
@@ -347,7 +344,7 @@ export default function ArticleScreen() {
   saveAnnotationRef.current = handleSaveAnnotation;
 
   useEffect(() => {
-    isBookmarked(slug).then(setBookmarked);
+    bookmarkStore.isBookmarked(slug).then(setBookmarked);
     loadRef.current();
   }, [slug]);
 
@@ -376,45 +373,25 @@ export default function ArticleScreen() {
     setWebReady(false);
     setBacklinkCount(0);
 
-    // These don't depend on the entry, so start them now and let them overlap
-    // with the entry read (and the network fetch on a cold open).
-    const aux = Promise.all([
-      getAnnotationsForSlug(slug),
-      getMeta('custom_css'),
-      getMeta('font_size'),
-    ]);
-    aux.catch(() => {}); // early returns below must not leave an unhandled rejection
-
-    let entry = forceRefetch ? null : await perf.time(slug, 'get-entry', () => getEntry(slug));
-
-    if (!entry?.content_html || forceRefetch) {
-      setState({ phase: 'fetching' });
-      const ok = await fetchAndCacheArticle(slug);
-      if (!ok) {
-        setState({ phase: 'error', message: 'Could not load this article. Check your connection.' });
-        return;
-      }
-      entry = await perf.time(slug, 'get-entry', () => getEntry(slug));
-    }
-
-    if (!entry?.content_html) {
-      setState({ phase: 'error', message: 'Article content unavailable.' });
+    // The entry (downloaded first when missing), the highlights split by validity and the two
+    // display settings: the core use case reads them together.
+    const loaded = await loadArticleData(slug, forceRefetch, () => setState({ phase: 'fetching' }));
+    if (loaded.status === 'error') {
+      setState({ phase: 'error', message: loaded.message });
       return;
     }
-
-    const [anns, customCss, fontSizeStr] = await aux;
-    const { valid, stale } = partitionAnnotations(anns, resolveEntryHash(entry), () => entry!.content_html ?? '');
+    const { entry, valid, stale, customCss, fontSize: fontSizeStr } = loaded;
     setAnnotations(valid);
     setOrphaned(stale);
     setOrphanDismissed(false);
 
-    recordRead(slug, entry.title, fromSlug).catch(() => {});
+    readerState.recordRead(slug, entry.title, fromSlug).catch(() => {});
     // Defer link indexing and InPhO backfill until after the navigation animation
     // completes so they don't compete with article render on the JS thread.
     const contentForIndex = entry.content_html ?? '';
-    idleScheduler.schedule(`index-links:${slug}`, () => indexLinks(slug, contentForIndex));
+    idleScheduler.schedule(`index-links:${slug}`, () => libraryRead.indexLinks(slug, contentForIndex));
     idleScheduler.schedule(`prime-inpho:${slug}`, async () => {
-      const recent = await getRecentSlugs(10);
+      const recent = await readerState.getRecentSlugs(10);
       const rest = recent.map(r => r.slug).filter(s => s !== slug);
       await primeBackfillForSlugs([slug, ...rest]);
       await primeGraphLayouts([slug, ...rest]);
@@ -442,7 +419,7 @@ export default function ArticleScreen() {
     // Show backlink count after article is ready (non-blocking). The native
     // renderer reads backlinkCount to draw a "Related by link" footer row; the
     // WebView path injects the row into the document.
-    getLinksTo(slug).then(backlinks => {
+    libraryRead.getLinksTo(slug).then(backlinks => {
       setBacklinkCount(backlinks.length);
       if (!USE_NATIVE_RENDERER && backlinks.length > 0) {
         webRef.current?.injectJavaScript(
@@ -473,7 +450,7 @@ export default function ArticleScreen() {
       const msg = JSON.parse(event.nativeEvent.data);
       if (msg.type === 'progress') {
         idleScheduler.noteActivity();
-        if (typeof msg.value === 'number') setReadProgress(slug, msg.value).catch(() => {});
+        if (typeof msg.value === 'number') readerState.setReadProgress(slug, msg.value).catch(() => {});
       } else if (msg.type === 'backlinks') {
         nav.navigate('Graph', { centerSlug: slug, centerTitle: title });
       } else if (msg.type === 'highlight') {
@@ -493,7 +470,7 @@ export default function ArticleScreen() {
     text: string, context: string | null, color: string, note: string | null
   ) {
     const currentHash = entryContentHash || null;
-    const ann = await saveAnnotation(slug, text, context, color, note, currentHash);
+    const ann = await annotationStore.saveAnnotation(slug, text, context, color, note, currentHash);
     const updated = [...annotations, ann];
     setAnnotations(updated);
     injectAnnotations([ann]);
@@ -502,7 +479,7 @@ export default function ArticleScreen() {
 
   async function handleModalSave(note: string | null, color: string) {
     if (editingAnnotation) {
-      await updateAnnotation(editingAnnotation.id, note, color);
+      await annotationStore.updateAnnotation(editingAnnotation.id, note, color);
       const updated = annotations.map(a =>
         a.id === editingAnnotation.id ? { ...a, note, color, updated_at: Date.now() } : a
       );
@@ -518,7 +495,7 @@ export default function ArticleScreen() {
 
   async function handleModalDelete() {
     if (!editingAnnotation) return;
-    await deleteAnnotation(editingAnnotation.id);
+    await annotationStore.deleteAnnotation(editingAnnotation.id);
     const updated = annotations.filter(a => a.id !== editingAnnotation.id);
     setAnnotations(updated);
     webRef.current?.injectJavaScript(`window.removeAnnotation(${editingAnnotation.id}); true;`);
@@ -561,7 +538,7 @@ export default function ArticleScreen() {
 
   const handleBookmark = async () => {
     const articleTitle = state.phase === 'ready' ? state.entry.title : title;
-    setBookmarked(await toggleBookmark(slug, articleTitle));
+    setBookmarked(await bookmarkStore.toggleBookmark(slug, articleTitle));
   };
 
   const handleTocJump = (href: string) => {
@@ -584,9 +561,9 @@ export default function ArticleScreen() {
   // Open a cross-reference. When the link-preview setting is on (default), show a
   // peek card (author + excerpt) first; otherwise navigate straight there.
   const goToEntry = useCallback(async (target: string) => {
-    const enabled = (await getMeta('link_preview')) !== '0'; // default ON
+    const enabled = (await metaStore.getMeta('link_preview')) !== '0'; // default ON
     if (!enabled) { navToEntry(target); return; }
-    const [prev, html] = await Promise.all([getEntryPreview(target), getEntryHtml(target)]);
+    const [prev, html] = await Promise.all([libraryRead.getEntryPreview(target), libraryRead.getEntryHtml(target)]);
     setLinkPreview({
       slug: target,
       title: prev?.title ?? target,
@@ -784,7 +761,7 @@ export default function ArticleScreen() {
               currentHash={entryContentHash}
               onResolved={(ids) => {
                 setOrphaned(prev => prev.filter(a => !ids.includes(a.id)));
-                getAnnotationsForSlug(slug).then(all => {
+                annotationStore.getAnnotationsForSlug(slug).then(all => {
                   const valid = all.filter(a => (state.entry.content_html ?? '').includes(a.selected_text));
                   setAnnotations(valid);
                   injectAnnotations(valid);
@@ -831,7 +808,7 @@ export default function ArticleScreen() {
                 }
                 onLinkPress={handleNativeLink}
                 onFootnotePress={handleFootnotePress}
-                onProgress={(v) => setReadProgress(slug, v).catch(() => {})}
+                onProgress={(v) => readerState.setReadProgress(slug, v).catch(() => {})}
                 resolveImageSrc={(src) => {
                   if (src.startsWith('http')) return src;
                   if (src.startsWith('/')) return `${SEP_BASE}${src}`;

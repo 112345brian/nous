@@ -293,8 +293,8 @@ branch, and converting everything this audit listed, these remain outside `src/c
 | `backfillMathHashFormat` | `services/catalog.ts`, scheduled from `src/boot/useBoot.ts` | Upgrade-only code (it migrates an earlier build's inline-base64 math format; guarded by `math_hash_format_v1`). The brief said `delete-legacy-compat` had deleted it; at the parent tip it is still defined and still scheduled, and `LEGACY_RE` is its regex. By the prerelease rule it should be deleted, not converted, and that is the project owner's call. It touches only the database and the equation table, calls no converted use case, and so does not block anything. |
 | `services/mathRender.ts` and `mathRenderHermes.ts` | `services/` | The renderer adapter: the WebView bridge (module-level `injectFn`, `readyPromise`, `pending`, `seq`, loaded from `expo-asset` and `expo-file-system`) and the flagged Hermes spike. The core sees it only as the injected `render` function. Making the bridge an instance owned by the root, with `MathRenderWebView` registering into it, would remove the last module-level coupling between a component and a service; it is a separate change. |
 | `db.ts`, `graphDb.ts`, `inpho.ts`, `seedImport.ts`, `secureSecrets.ts`, `downloadNotification.ts`, `mathRender.ts`, `expoSyncFolder.ts`, `zoteroHttp.ts` | `services/` | These are the adapters. They are allowed to be concrete. The pure graph-assembly logic inside `graphDb.ts` and the TTL logic in `inpho.ts` could move inward (section 5, items 4 to 6). |
-| Ten files that import `services/db` | UI and boot | Shrink-only list (RC5). Each needs a wired use case first. |
-| `utils/motion.ts`, `utils/useBackDismiss.ts`, `utils/sepHtml/render/**` | `utils/` | React Native UI code that sits under `utils/`. Recorded as outer-ring exceptions in `innerRing.test.ts` (each is checked to still import react or react-native). They belong in a `ui/` folder; moving them touches imports in files other sessions edit. |
+| `screens/GraphScreen.tsx` imports `services/db` | UI | The only RC5 allowlist entry left; the graph session owns it. The other nine UI files moved to the stores below. |
+| `utils/sepHtml/render/**` | `utils/` | React Native UI code that sits under `utils/`; still an outer-ring exception in `innerRing.test.ts`. (`motion.ts` and `useBackDismiss.ts` moved to `src/ui/`, which counts as outer ring.) |
 | `theme/` | UI | Outer ring by definition (the enforcement test lists it). |
 | `useBoot` notifier wiring, `MathRenderWebView` bridge | UI | See section 3. |
 | Module state in adapters: `attempted` in `services/prefetch.ts` and the bridge variables in `mathRender.ts` | `services/` | Allowed at the edge. (The cache, the scheduler and the pacing are now instances built in the root; `_resetMathCacheState` is just that instance's `reset`.) |
@@ -310,3 +310,41 @@ branch, and converting everything this audit listed, these remain outside `src/c
   port) and `seedImport`.
 - The parent tests that imported `downloadAll`, `syncCachedArticles`, `completeArticleMath` and
   friends from `services/catalog` now import them from `composition`. Only import lines changed.
+
+## UI stores and use cases (the screens off the SQLite adapter)
+
+Design: the screens needed many small reads and writes, so the core gets **ports grouped by use
+case**, not one database interface. All are in `src/core/ports.ts` ("Stores the screens read and
+write"); the root builds each from the `services/db` functions and exports it.
+
+| Port (root export) | Holds |
+|---|---|
+| `ReaderStateStore` (`readerState`) | recordRead, setReadProgress, forceSetReadProgress, getRecentSlugs, getSessions |
+| `BookmarkStore` (`bookmarkStore`) | toggleBookmark, isBookmarked, getBookmarks, getBookmarksFull |
+| `AnnotationStore` (`annotationStore`) | per-article and all highlights, save/update/delete, re-anchor |
+| `LibraryReadStore` (`libraryRead`) | getEntry, getEntryHtml, getEntryPreview, getAllEntries, searchEntries, getLinksTo, indexLinks, getMathSvgMap, getEntryCount(s), clearArticleCache |
+| `AppPrefsStore` (`appPrefs`) | first-run prefs, Zotero credentials, sync folder |
+| `KeyValueStore` (`metaStore`) | the `meta` table; also what `ThemeProvider` receives as its `store` prop |
+
+The shapes (`Prefs`, `BookmarkRow`, `AnnotationWithTitle`) moved to `src/types.ts` so a port can
+name them; `db.ts` still declares identical ones (structural typing) until its own cleanup.
+
+Where a screen did real logic around a call, it is now a use case (plain fakes, no clock or timer;
+`src/core/__tests__/uiUseCases.test.ts`, which also compares each against the old inline code):
+
+| Use case (root wrapper) | Replaces |
+|---|---|
+| `loadArticleForReading` (`loadArticleData`) | ArticleScreen's load: overlap highlight and setting reads with the entry read, download when missing, split highlights valid/stale |
+| `reanchorOrphans`, `deleteOrphans` | OrphanedAnnotationsBanner: re-anchor and persist, result message |
+| `loadHomeData` | HomeScreen's three-way read |
+| `loadReaderSettings` | SettingsScreen's five meta reads and their parsing |
+| `autoDeepSyncDue`, `runAutoDeepSync` | the due-date rule inside useBoot's idle task |
+| `prepareZoteroSend` | ReadingListScreen: credentials check and highlight read |
+
+Pure rules extracted to `src/utils` (not use cases): `annotationGroups`, `homeLists`,
+`zoteroMessage`, `readerSettings`, `entryHash` (same one-line rule as `resolveEntryHash` in
+`db.ts`, which this slice may not edit: dedupe when the pure-helper session lands).
+
+Left in place: `getSessions`' `buildTree` (the session tree) still lives in `services/db.ts`
+because that file belongs to another session; `ReaderStateStore.getSessions` is a pass-through
+until it moves. The `getEntry.callers` guard now lists `core/loadArticle.ts` and the port.

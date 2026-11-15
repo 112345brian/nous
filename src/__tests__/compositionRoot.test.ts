@@ -73,27 +73,26 @@ const CONVERTED = [
 // reason, and the check below fails if the entry stops being true.
 const WIRING_EXCEPTIONS: Array<{ file: string; reason: string }> = [];
 
-// RC5: files outside the root that import the SQLite adapter (services/db) directly. Shrink-only.
+// RC5: files outside the root that import the SQLite adapter (services/db) as a value. Shrink-only.
+// The screens, components, useBoot and ThemeProvider now take the stores (readerState, bookmarkStore,
+// annotationStore, libraryRead, appPrefs, metaStore) and the UI use cases from the root. Only the
+// graph screen is left; the graph session owns it. When it moves, this list is empty and stays so.
 const DB_DIRECT_ALLOWLIST = [
-  'src/boot/useBoot.ts',          // the boot state machine moved here from App.tsx
-  'src/components/OrphanedAnnotationsBanner.tsx',
-  'src/screens/AnnotationsScreen.tsx',
-  'src/screens/ArticleScreen.tsx',
   'src/screens/GraphScreen.tsx',
-  'src/screens/HistoryScreen.tsx',
-  'src/screens/HomeScreen.tsx',
-  'src/screens/ReadingListScreen.tsx',
-  'src/screens/SettingsScreen.tsx',
-  // New with the light-mode work: reads and writes the 'appearance' preference through getMeta/setMeta.
-  // Route it through the root (a KeyValueStore passed to the provider) and remove it from this list.
-  'src/theme/ThemeProvider.tsx',
+];
+
+// What the root exports for the UI (stores and the use cases built over them).
+const UI_ROOT_EXPORTS = [
+  'metaStore', 'readerState', 'bookmarkStore', 'annotationStore', 'libraryRead', 'appPrefs',
+  'loadArticleData', 'reanchorOrphans', 'deleteOrphans', 'loadHomeData', 'loadReaderSettings',
+  'prepareZoteroSend', 'runAutoDeepSync',
 ];
 
 describe('the composition root exists', () => {
   test('src/composition.ts is present and exports the converted use cases', () => {
     expect(fs.existsSync(path.join(ROOT, 'src/composition.ts'))).toBe(true);
     const text = read('src/composition.ts');
-    for (const name of CONVERTED) expect(text).toMatch(new RegExp(`\\b${name}\\b`));
+    for (const name of [...CONVERTED, ...UI_ROOT_EXPORTS]) expect(text).toMatch(new RegExp(`\\b${name}\\b`));
   });
 });
 
@@ -149,6 +148,20 @@ describe('RC5: direct use of the SQLite adapter can only shrink', () => {
   test('every allowlisted file still imports it, so migrated files must leave the list', () => {
     const stale = DB_DIRECT_ALLOWLIST.filter(f => !importsDb(f));
     expect(stale).toEqual([]);
+  });
+});
+
+describe('RC5: the screens that were migrated stay off the adapter', () => {
+  test('these UI files never import services/db, as a value or a type', () => {
+    const migrated = UI.filter(f => f !== 'src/screens/GraphScreen.tsx');
+    expect(migrated.length).toBeGreaterThan(8);
+    const bad = [...migrated, 'src/theme/ThemeProvider.tsx', ...SRC.filter(f => f.startsWith('src/ui/'))]
+      .filter(f => importsFor(f).some(i => i.from === 'src/services/db'));
+    expect(bad).toEqual([]);
+  });
+  test('ThemeProvider receives its store; it does not import the root or an adapter', () => {
+    const froms = importsFor('src/theme/ThemeProvider.tsx').map(i => i.from);
+    expect(froms.some(f => f.startsWith('src/services/') || f === 'src/composition')).toBe(false);
   });
 });
 

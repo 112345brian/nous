@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useColorScheme } from 'react-native';
-import { getMeta, setMeta } from '../services/db';
+import type { KeyValueStore } from '../core/ports';
 import { setScheme, type Scheme } from './tokens';
 
 export type Appearance = 'system' | 'light' | 'dark';
@@ -21,7 +21,8 @@ export function useScheme(): Ctx {
   return useContext(ThemeCtx);
 }
 
-export function ThemeProvider({ children }: { children: React.ReactNode }) {
+/** `store` holds the saved choice (the `meta` table in the app); the root provides it. */
+export function ThemeProvider({ children, store }: { children: React.ReactNode; store: KeyValueStore }) {
   const system = useColorScheme();
   const [appearance, setAppearanceState] = useState<Appearance>('system');
   const scheme = resolveScheme(appearance, system);
@@ -31,17 +32,17 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // The DB opens during boot; until the stored choice loads we follow the system.
     let cancelled = false;
-    const load = (n: number) => getMeta('appearance')
+    const load = (n: number) => store.getMeta('appearance')
       .then(v => { if (!cancelled) setAppearanceState(parseAppearance(v)); })
       .catch(() => { if (!cancelled && n < 5) setTimeout(() => load(n + 1), 1000); });
     load(0);
     return () => { cancelled = true; };
-  }, []);
+  }, [store]);
 
   const setAppearance = useCallback((a: Appearance) => {
     setAppearanceState(a);
-    setMeta('appearance', a).catch(() => {});
-  }, []);
+    store.setMeta('appearance', a).catch(() => {});
+  }, [store]);
 
   const value = useMemo(() => ({ scheme, appearance, setAppearance }), [scheme, appearance, setAppearance]);
   return <ThemeCtx.Provider value={value}>{children}</ThemeCtx.Provider>;

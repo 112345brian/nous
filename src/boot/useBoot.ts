@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getEntryCount, getMeta, getPrefs, getRecentSlugs, savePrefs } from '../services/db';
-import type { Prefs } from '../services/db';
+import type { Prefs } from '../types';
 import { importSeedFromUrl } from '../services/seedImport';
 import type { SeedPhase } from '../services/seedImport';
-import { backfillAst, resumePendingMath, downloadAll, refreshIndexIfStale, syncCachedArticles, scheduleCommonMathPrewarm, idleScheduler, withDownloadHold } from '../composition';
+import { backfillAst, resumePendingMath, downloadAll, refreshIndexIfStale, scheduleCommonMathPrewarm, idleScheduler, withDownloadHold, metaStore, appPrefs, readerState, libraryRead, runAutoDeepSync } from '../composition';
 import { preloadMathJax } from '../services/mathRender';
 import { startDownloadNotification, updateDownloadNotification, finishDownloadNotification } from '../services/downloadNotification';
 
@@ -29,13 +28,13 @@ export function useBoot(openArticle: (slug: string, title: string) => void): Boo
   useEffect(() => { openArticleRef.current = openArticle; }, [openArticle]);
 
   const initialize = useCallback(async (prefs: Prefs) => {
-    const count = await getEntryCount();
+    const count = await libraryRead.getEntryCount();
 
     if (count === 0) {
       setPhase('indexing');
       try {
         await refreshIndexIfStale();
-        const newCount = await getEntryCount();
+        const newCount = await libraryRead.getEntryCount();
         if (newCount === 0) { setPhase('index_error'); return; }
       } catch {
         setPhase('index_error');
@@ -51,7 +50,7 @@ export function useBoot(openArticle: (slug: string, title: string) => void): Boo
     // which would snap the phase from 'ready' back to 'index_error'.
     (async () => {
       if (prefs.homeMode === 'continue') {
-        getRecentSlugs(1).then(recent => {
+        readerState.getRecentSlugs(1).then(recent => {
           if (recent.length > 0) {
             setTimeout(() => {
               openArticleRef.current(recent[0].slug, recent[0].title);
@@ -64,7 +63,7 @@ export function useBoot(openArticle: (slug: string, title: string) => void): Boo
       // (meaning math_pending lists articles whose TeX still needs SVG rendering)
       // or if a bulk download is about to bring in new articles that will need it.
       // Otherwise let it load lazily on first use — no point paying boot cost.
-      const mathPending = ((await getMeta('math_pending')) ?? '[]') !== '[]';
+      const mathPending = ((await metaStore.getMeta('math_pending')) ?? '[]') !== '[]';
       if (mathPending || prefs.downloadAll) preloadMathJax();
 
       if (prefs.downloadAll) {
@@ -82,16 +81,7 @@ export function useBoot(openArticle: (slug: string, title: string) => void): Boo
       // task errors, so nothing here can reach boot().catch().
       idleScheduler.schedule('resume-pending-math', resumePendingMath);
       idleScheduler.schedule('backfill-ast', backfillAst);
-      idleScheduler.schedule('auto-deep-sync', async () => {
-        const [autoSync, lastDeepSync] = await Promise.all([getMeta('auto_sync'), getMeta('last_deep_sync')]);
-        if (autoSync && autoSync !== 'off') {
-          const days = autoSync === '2days' ? 2 : 7;
-          const elapsed = Date.now() - (lastDeepSync ? Number(lastDeepSync) : 0);
-          if (elapsed > days * 24 * 60 * 60 * 1000) {
-            await syncCachedArticles(() => {});
-          }
-        }
-      });
+      idleScheduler.schedule('auto-deep-sync', async () => { await runAutoDeepSync(); });
       // Lowest priority: queued last (FIFO), so it runs after everything above.
       scheduleCommonMathPrewarm();
     })().catch(() => {});
@@ -99,12 +89,12 @@ export function useBoot(openArticle: (slug: string, title: string) => void): Boo
 
   useEffect(() => {
     (async () => {
-      const onboardingDone = await getMeta('onboarding_done');
+      const onboardingDone = await metaStore.getMeta('onboarding_done');
       if (!onboardingDone) {
         setPhase('onboarding');
         return;
       }
-      await initialize(await getPrefs());
+      await initialize(await appPrefs.getPrefs());
     })().catch(() => setPhase('index_error'));
   }, [initialize]);
 
@@ -120,7 +110,7 @@ export function useBoot(openArticle: (slug: string, title: string) => void): Boo
       setSeedPhase(null);
     }
     // Save prefs after any seed import so they land in the final DB, not the pre-seed one.
-    await savePrefs(prefs);
+    await appPrefs.savePrefs(prefs);
     setPhase('indexing');
     try {
       await initialize(prefs);

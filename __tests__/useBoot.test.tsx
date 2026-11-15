@@ -3,13 +3,6 @@ import ReactTestRenderer from 'react-test-renderer';
 import { useBoot } from '../src/boot/useBoot';
 import type { BootResult } from '../src/boot/useBoot';
 
-jest.mock('../src/services/db', () => ({
-  getEntryCount: jest.fn(),
-  getMeta: jest.fn(),
-  getPrefs: jest.fn(),
-  getRecentSlugs: jest.fn(),
-  savePrefs: jest.fn(),
-}));
 jest.mock('../src/services/seedImport', () => ({ importSeedFromUrl: jest.fn() }));
 // The use cases come from the composition root. The common-math pre-warm is wired there too; its
 // stand-in schedules the same task name through the (mocked) idle scheduler, as the real one does.
@@ -25,6 +18,12 @@ jest.mock('../src/composition', () => {
     syncCachedArticles: jest.fn(),
     idleScheduler,
     withDownloadHold: jest.fn((fn: () => Promise<unknown>) => fn()),
+    // The stores come from the root too (useBoot never imports services/db).
+    metaStore: { getMeta: jest.fn(), setMeta: jest.fn() },
+    appPrefs: { getPrefs: jest.fn(), savePrefs: jest.fn() },
+    readerState: { getRecentSlugs: jest.fn() },
+    libraryRead: { getEntryCount: jest.fn() },
+    runAutoDeepSync: jest.fn(),
     scheduleCommonMathPrewarm: jest.fn(() => idleScheduler.schedule('prewarm-common-math', jest.fn())),
   };
 });
@@ -36,9 +35,13 @@ jest.mock('../src/services/downloadNotification', () => ({
 }));
 
 /* eslint-disable @typescript-eslint/no-require-imports */
-const db = require('../src/services/db');
 const seed = require('../src/services/seedImport');
 const root = require('../src/composition');
+// The same mock functions under the names this file's tests have always used.
+const db = {
+  getMeta: root.metaStore.getMeta, getPrefs: root.appPrefs.getPrefs, savePrefs: root.appPrefs.savePrefs,
+  getRecentSlugs: root.readerState.getRecentSlugs, getEntryCount: root.libraryRead.getEntryCount,
+};
 const { idleScheduler } = require('../src/composition');
 
 const prefs = (over: object = {}) => ({ homeMode: 'search', downloadAll: false, seedUrl: '', ...over });

@@ -39,6 +39,17 @@ import { startPrefetch as startPrefetchAdapter } from './services/prefetch';
 import { prewarmCommonMath, type PrewarmDeps } from './core/prewarmCommonMath';
 import { COMMON_MATH, commonMathStamp } from './data/commonMath';
 import { perf } from './services/perf';
+// UI stores and use cases (section "UI stores" below).
+import * as dbStore from './services/db';
+import type {
+  AnnotationStore, AppPrefsStore, BookmarkStore, KeyValueStore, LibraryReadStore, ReaderStateStore,
+} from './core/ports';
+import { loadArticleForReading } from './core/loadArticle';
+import { reanchorOrphans as reanchorOrphansUseCase, deleteOrphans as deleteOrphansUseCase } from './core/orphanedAnnotations';
+import { loadHomeData as loadHomeDataUseCase } from './core/homeData';
+import { loadReaderSettings as loadReaderSettingsUseCase } from './core/readerSettings';
+import { runAutoDeepSync as runAutoDeepSyncUseCase } from './core/autoDeepSync';
+import { prepareZoteroSend as prepareZoteroSendUseCase } from './core/zoteroSend';
 import { linkifyHtml } from './utils/linkifier';
 import seedEntries from './assets/entry-seed.json';
 
@@ -270,3 +281,88 @@ export function scheduleCommonMathPrewarm(
   return scheduler.schedule(COMMON_MATH_TASK_KEY, () => prewarmCommonMath(deps));
 }
 
+// ── UI stores ────────────────────────────────────────────────────────────────
+
+// The stores the screens read and write, built from the SQLite adapter. Screens never import
+// services/db (RC5); they take these from here. Each is typed by its port in src/core/ports.ts,
+// so a method added to db.ts is not visible to the UI until it is added to a port.
+
+/** The `meta` table: small settings and bookkeeping (appearance, font size, onboarding flag...). */
+export const metaStore: KeyValueStore = { getMeta: dbStore.getMeta, setMeta: dbStore.setMeta };
+
+export const readerState: ReaderStateStore = {
+  recordRead: dbStore.recordRead,
+  setReadProgress: dbStore.setReadProgress,
+  forceSetReadProgress: dbStore.forceSetReadProgress,
+  getRecentSlugs: dbStore.getRecentSlugs,
+  getSessions: dbStore.getSessions,
+};
+
+export const bookmarkStore: BookmarkStore = {
+  toggleBookmark: dbStore.toggleBookmark,
+  isBookmarked: dbStore.isBookmarked,
+  getBookmarks: dbStore.getBookmarks,
+  getBookmarksFull: dbStore.getBookmarksFull,
+};
+
+export const annotationStore: AnnotationStore = {
+  getAnnotationsForSlug: dbStore.getAnnotationsForSlug,
+  getAllAnnotations: dbStore.getAllAnnotations,
+  saveAnnotation: dbStore.saveAnnotation,
+  updateAnnotation: dbStore.updateAnnotation,
+  deleteAnnotation: dbStore.deleteAnnotation,
+  deleteAnnotations: dbStore.deleteAnnotations,
+  updateAnnotationAnchor: dbStore.updateAnnotationAnchor,
+};
+
+export const libraryRead: LibraryReadStore = {
+  getEntry: dbStore.getEntry,
+  getEntryHtml: dbStore.getEntryHtml,
+  getEntryPreview: dbStore.getEntryPreview,
+  getAllEntries: dbStore.getAllEntries,
+  searchEntries: dbStore.searchEntries,
+  getLinksTo: dbStore.getLinksTo,
+  indexLinks: dbStore.indexLinks,
+  getMathSvgMap: dbStore.getMathSvgMap,
+  getEntryCounts: dbStore.getEntryCounts,
+  getEntryCount: dbStore.getEntryCount,
+  clearArticleCache: dbStore.clearArticleCache,
+};
+
+export const appPrefs: AppPrefsStore = {
+  getPrefs: dbStore.getPrefs,
+  savePrefs: dbStore.savePrefs,
+  getZoteroPrefs: dbStore.getZoteroPrefs,
+  saveZoteroPrefs: dbStore.saveZoteroPrefs,
+  getSyncFolder: () => dbStore.getSyncFolder() as Promise<string>,
+  setSyncFolder: dbStore.setSyncFolder,
+};
+
+// ── UI use cases ─────────────────────────────────────────────────────────────
+
+/** Entry + highlights + display settings for the reader; downloads the article first when needed. */
+export function loadArticleData(slug: string, forceRefetch: boolean, onFetching?: () => void) {
+  return loadArticleForReading(
+    {
+      library: libraryRead, annotations: annotationStore, meta: metaStore, timing: perf,
+      fetchArticle: s => fetchAndCacheArticle(s),
+    },
+    slug, forceRefetch, onFetching,
+  );
+}
+
+export const reanchorOrphans = (anns: Parameters<typeof reanchorOrphansUseCase>[1], content: string, hash: string) =>
+  reanchorOrphansUseCase(annotationStore, anns, content, hash);
+export const deleteOrphans = (ids: number[]) => deleteOrphansUseCase(annotationStore, ids);
+
+export const loadHomeData = () =>
+  loadHomeDataUseCase({ reads: readerState, bookmarks: bookmarkStore, annotations: annotationStore });
+
+export const loadReaderSettings = () => loadReaderSettingsUseCase(metaStore);
+
+export const prepareZoteroSend = (slug: string) =>
+  prepareZoteroSendUseCase({ prefs: appPrefs, annotations: annotationStore }, slug);
+
+/** Re-download cached articles when the auto-sync setting says it is due. */
+export const runAutoDeepSync = () =>
+  runAutoDeepSyncUseCase({ meta: metaStore, clock: { now: () => Date.now() }, sync: () => syncCachedArticles(() => {}) });

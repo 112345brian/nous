@@ -8,13 +8,11 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
-  getPrefs, savePrefs, getMeta, setMeta,
-  clearArticleCache, getZoteroPrefs, saveZoteroPrefs, getSyncFolder, setSyncFolder,
-  getEntryCounts,
-} from '../services/db';
-import type { Prefs } from '../services/db';
-import { downloadAll, syncCachedArticles, exportToSyncFolder, importFromSyncFolder, withDownloadHold } from '../composition';
-import type { DownloadProgress } from '../types';
+  downloadAll, syncCachedArticles, exportToSyncFolder, importFromSyncFolder, withDownloadHold,
+  metaStore, appPrefs, libraryRead, loadReaderSettings,
+} from '../composition';
+import { linkPreviewValue } from '../utils/readerSettings';
+import type { DownloadProgress, Prefs } from '../types';
 import { importSeedFromUrl } from '../services/seedImport';
 import type { RootStackParamList } from '../../App';
 import { colors, themedStyles, roleMap } from '../theme/tokens';
@@ -44,21 +42,21 @@ export default function SettingsScreen() {
   const [linkPreview, setLinkPreview] = useState(true);
 
   useFocusEffect(useCallback(() => {
-    getPrefs().then(setPrefs);
-    getMeta('index_refreshed_at').then(ts =>
-      setLastSync(ts ? new Date(Number(ts)).toLocaleDateString() : null)
-    );
-    getZoteroPrefs().then(p => { setZoteroKey(p.apiKey); setZoteroId(p.userId); });
-    getSyncFolder().then(setSyncFolderState);
-    getMeta('custom_css').then(v => setCustomCss(v ?? ''));
-    getMeta('font_size').then(v => setFontSize(v ? parseInt(v, 10) : 17));
-    getMeta('auto_sync').then(v => setAutoSync(v ?? 'off'));
-    getMeta('link_preview').then(v => setLinkPreview(v !== '0'));
+    appPrefs.getPrefs().then(setPrefs);
+    appPrefs.getZoteroPrefs().then(p => { setZoteroKey(p.apiKey); setZoteroId(p.userId); });
+    appPrefs.getSyncFolder().then(setSyncFolderState);
+    loadReaderSettings().then(s => {
+      setLastSync(s.indexRefreshedAt !== null ? new Date(s.indexRefreshedAt).toLocaleDateString() : null);
+      setCustomCss(s.customCss);
+      setFontSize(s.fontSize);
+      setAutoSync(s.autoSync);
+      setLinkPreview(s.linkPreview);
+    });
     loadCounts();
   }, []));
 
   async function loadCounts() {
-    const { total, cached } = await getEntryCounts();
+    const { total, cached } = await libraryRead.getEntryCounts();
     setTotalCount(total);
     setCachedCount(cached);
   }
@@ -66,40 +64,40 @@ export default function SettingsScreen() {
   async function updatePref<K extends keyof Prefs>(key: K, value: Prefs[K]) {
     const next = { ...prefs, [key]: value };
     setPrefs(next);
-    await savePrefs(next);
+    await appPrefs.savePrefs(next);
   }
 
   function toggleLinkPreview() {
     const next = !linkPreview;
     setLinkPreview(next);
-    setMeta('link_preview', next ? '1' : '0').catch(() => {});
+    metaStore.setMeta('link_preview', linkPreviewValue(next)).catch(() => {});
   }
 
   async function saveCustomCss() {
-    await setMeta('custom_css', customCss.trim());
+    await metaStore.setMeta('custom_css', customCss.trim());
     setCssSaved(true);
     setTimeout(() => setCssSaved(false), 2000);
   }
 
   async function resetCustomCss() {
-    await setMeta('custom_css', '');
+    await metaStore.setMeta('custom_css', '');
     setCustomCss('');
     setCssSaved(false);
   }
 
   async function updateFontSize(px: number) {
     setFontSize(px);
-    await setMeta('font_size', String(px));
+    await metaStore.setMeta('font_size', String(px));
   }
 
   async function saveZotero() {
-    await saveZoteroPrefs(zoteroKey.trim(), zoteroId.trim());
+    await appPrefs.saveZoteroPrefs(zoteroKey.trim(), zoteroId.trim());
     setZoteroSaved(true);
     setTimeout(() => setZoteroSaved(false), 2000);
   }
 
   async function saveSyncFolder() {
-    await setSyncFolder(syncFolder.trim());
+    await appPrefs.setSyncFolder(syncFolder.trim());
     Alert.alert('Sync folder saved', `The app will sync to:\n${syncFolder.trim()}`);
   }
 
@@ -137,7 +135,7 @@ export default function SettingsScreen() {
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Clear Cache', style: 'destructive',
-          onPress: async () => { await clearArticleCache(); loadCounts(); },
+          onPress: async () => { await libraryRead.clearArticleCache(); loadCounts(); },
         },
       ]
     );
@@ -204,7 +202,7 @@ export default function SettingsScreen() {
 
   async function setAutoSyncPref(value: string) {
     setAutoSync(value);
-    await setMeta('auto_sync', value);
+    await metaStore.setMeta('auto_sync', value);
   }
 
   return (

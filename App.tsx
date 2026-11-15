@@ -9,8 +9,9 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { NavigationContainerRef } from '@react-navigation/native';
 import { useBoot } from './src/boot/useBoot';
 import { ThemeProvider, useScheme, withTheme } from './src/theme/ThemeProvider';
+import { metaStore } from './src/composition';
 import { withWideFrame } from './src/components/WideFrame';
-import { isReduceMotion } from './src/utils/motion';
+import { isReduceMotion } from './src/ui/motion';
 import { APP_ACCENT } from './src/utils/sepHtml/render/theme';
 import { IS_TEST_BUILD } from './src/testConfig';
 import MathRenderWebView from './src/components/MathRenderWebView';
@@ -99,7 +100,7 @@ function ThemedStatusBar() {
 
 export default function App() {
   return (
-    <ThemeProvider>
+    <ThemeProvider store={metaStore}>
       <ThemedStatusBar />
       {IS_TEST_BUILD ? <TestApp /> : <MainApp />}
     </ThemeProvider>

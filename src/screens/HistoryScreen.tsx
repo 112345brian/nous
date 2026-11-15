@@ -6,7 +6,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { getSessions } from '../services/db';
+import { readerState } from '../composition';
 import type { Session, ReadNode } from '../types';
 import type { RootStackParamList } from '../../App';
 import { colors, themedStyles } from '../theme/tokens';
@@ -19,7 +19,7 @@ export default function HistoryScreen() {
   const [sessions, setSessions] = useState<Session[]>([]);
 
   useFocusEffect(useCallback(() => {
-    getSessions(40).then(setSessions);
+    readerState.getSessions(40).then(setSessions);
   }, []));
 
   const open = (slug: string, title: string) =>

@@ -24,8 +24,11 @@ function walk(dir: string, out: string[] = []): string[] {
 // Files that legitimately need the full row, and why.
 const ALLOWED_FULL_ROW_CALLERS: Record<string, string> = {
   'src/services/db.ts': 'defines getEntry',
+  'src/core/ports.ts': 'declares getEntry on LibraryReadStore',
+  'src/core/loadArticle.ts':
+    'loadArticleForReading(): needs AST + html (hash, annotation check, link index, WebView fallback)',
   'src/screens/ArticleScreen.tsx':
-    'load(): needs AST + html (hash, annotation check, link index, WebView fallback)',
+    'the native renderer reads content_ast once the reader is idle (libraryRead.getEntry)',
   'src/tests/runTests.ts': 'on-device test runner asserts stored fields',
 };
 

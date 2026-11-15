@@ -76,9 +76,9 @@ describe('controls', () => {
 });
 
 describe('motion', () => {
-  it('only utils/motion.ts drives sheet springs (so Reduce Motion is honored)', () => {
+  it('only ui/motion.ts drives sheet springs (so Reduce Motion is honored)', () => {
     const offenders = srcFiles
-      .filter(f => !f.endsWith('utils/motion.ts'))
+      .filter(f => !f.endsWith('ui/motion.ts'))
       .filter(f => /Animated\.spring\(/.test(read(f)))
       .map(rel);
     expect(offenders).toEqual([]);

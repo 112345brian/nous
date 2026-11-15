@@ -1,4 +1,7 @@
-import type { EntryRef, EntryRow, IndexEntry, LibraryScope } from '../types';
+import type {
+  Annotation, AnnotationWithTitle, BookmarkRow, EntryRef, EntryRow, EntrySummary, IndexEntry, LibraryScope,
+  Prefs, Session,
+} from '../types';
 import type { MathPriority } from '../utils/mathThrottlePolicy';
 
 // Ports: the outward-facing interfaces the core needs. Plain TypeScript only.
@@ -167,3 +170,78 @@ export interface MathStore {
   putMathBatch(rows: Array<{ hash: string; svg: string; w: number; h: number; display: boolean }>): Promise<void>;
 }
 
+
+// ── Stores the screens read and write (UI use cases) ─────────────────────────
+//
+// Grouped by use case, not one big interface. The root (src/composition.ts) builds each from the
+// SQLite adapter and exports it; screens and useBoot take them from the root. Preferences kept in
+// the `meta` table use KeyValueStore above. A use case lists only the slice it needs with
+// Pick<...>, so its fake stays small.
+
+/** What the reader has read: history, progress, recents. */
+export interface ReaderStateStore {
+  /** Log a visit (starts a new session after a long gap; `fromSlug` is the page the link came from). */
+  recordRead(slug: string, title: string, fromSlug: string | null): Promise<void>;
+  /** Scroll progress 0..1; only ratchets upward. */
+  setReadProgress(slug: string, progress: number): Promise<void>;
+  /** Set progress exactly (mark as read / unread). */
+  forceSetReadProgress(slug: string, progress: number): Promise<void>;
+  /** Most recently read distinct entries, newest first. */
+  getRecentSlugs(limit?: number): Promise<EntrySummary[]>;
+  /** The newest `limit` reading sessions, each with its tree of reads, newest first. */
+  getSessions(limit?: number): Promise<Session[]>;
+}
+
+/** The reading list. */
+export interface BookmarkStore {
+  /** Add or remove; resolves to whether the entry is bookmarked afterwards. */
+  toggleBookmark(slug: string, title: string): Promise<boolean>;
+  isBookmarked(slug: string): Promise<boolean>;
+  getBookmarks(): Promise<EntrySummary[]>;
+  getBookmarksFull(): Promise<BookmarkRow[]>;
+}
+
+/** Highlights and notes. */
+export interface AnnotationStore {
+  getAnnotationsForSlug(slug: string): Promise<Annotation[]>;
+  getAllAnnotations(): Promise<AnnotationWithTitle[]>;
+  saveAnnotation(
+    slug: string, selectedText: string, context: string | null, color: string,
+    note?: string | null, currentHash?: string | null,
+  ): Promise<Annotation>;
+  updateAnnotation(id: number, note: string | null, color: string): Promise<void>;
+  deleteAnnotation(id: number): Promise<void>;
+  deleteAnnotations(ids: number[]): Promise<void>;
+  /** Point a highlight at its text in a newer version of the article. */
+  updateAnnotationAnchor(id: number, newText: string, newHash: string): Promise<void>;
+}
+
+/** Reading entries from the local library: lookup, search, links and cached equations. */
+export interface LibraryReadStore {
+  getEntry(slug: string): Promise<EntryRow | null>;
+  getEntryHtml(slug: string): Promise<string | null>;
+  getEntryPreview(slug: string): Promise<{ title: string; author: string | null; excerpt: string | null } | null>;
+  getAllEntries(): Promise<{ slug: string; title: string; parent_label: string | null }[]>;
+  searchEntries(query: string, limit?: number): Promise<EntrySummary[]>;
+  /** Entries whose body links to `slug`. */
+  getLinksTo(slug: string): Promise<EntrySummary[]>;
+  /** Record which entries `contentHtml` links to. */
+  indexLinks(fromSlug: string, contentHtml: string): Promise<void>;
+  /** Rendered equations by content hash (SVG text). */
+  getMathSvgMap(hashes: string[]): Promise<Record<string, string>>;
+  getEntryCounts(scope?: LibraryScope): Promise<{ total: number; cached: number }>;
+  /** How many entries are in the index (0 on a fresh install). */
+  getEntryCount(): Promise<number>;
+  /** Drop every downloaded article body (the index and the reader's own data stay). */
+  clearArticleCache(): Promise<void>;
+}
+
+/** First-run preferences and the settings that are more than a single meta key. */
+export interface AppPrefsStore {
+  getPrefs(): Promise<Prefs>;
+  savePrefs(prefs: Prefs): Promise<void>;
+  getZoteroPrefs(): Promise<{ apiKey: string; userId: string }>;
+  saveZoteroPrefs(apiKey: string, userId: string): Promise<void>;
+  getSyncFolder(): Promise<string>;
+  setSyncFolder(path: string): Promise<void>;
+}

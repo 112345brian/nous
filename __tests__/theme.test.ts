@@ -155,7 +155,7 @@ describe('wiring', () => {
   const read = (rel: string) => fs.readFileSync(path.join(root, rel), 'utf8');
   it('App wraps everything in the provider and passes the scheme to navigation', () => {
     const app = read('App.tsx');
-    expect(app).toMatch(/<ThemeProvider>/);
+    expect(app).toMatch(/<ThemeProvider store=\{metaStore\}>/);
     expect(app).toMatch(/navTheme\(scheme\)/);
     expect(app).toMatch(/barStyle=\{scheme === 'light' \? 'dark-content' : 'light-content'\}/);
   });
@@ -166,7 +166,7 @@ describe('wiring', () => {
     const s = read('src/screens/SettingsScreen.tsx');
     expect(s).toMatch(/'system', 'light', 'dark'/);
     expect(s).toMatch(/setAppearance\(a\)/);
-    expect(read('src/theme/ThemeProvider.tsx')).toMatch(/setMeta\('appearance'/);
+    expect(read('src/theme/ThemeProvider.tsx')).toMatch(/store\.setMeta\('appearance'/);
   });
   it('reader theme is cached per scheme', () => {
     expect(read('src/utils/sepHtml/render/theme.ts')).toMatch(/getScheme\(\) === 'light' \? -base : base/);

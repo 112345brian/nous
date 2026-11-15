@@ -6,12 +6,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import {
-  getBookmarksFull, toggleBookmark, formatCitation, getZoteroPrefs,
-  getAnnotationsForSlug,
-} from '../services/db';
-import type { BookmarkRow } from '../services/db';
-import { exportToZotero } from '../composition';
+import { bookmarkStore, exportToZotero, prepareZoteroSend } from '../composition';
+import { formatCitation } from '../utils/citation';
+import { zoteroSavedMessage } from '../utils/zoteroMessage';
+import type { BookmarkRow } from '../types';
 import type { RootStackParamList } from '../../App';
 import { colors, themedStyles } from '../theme/tokens';
 
@@ -23,7 +21,7 @@ export default function ReadingListScreen() {
   const [items, setItems] = useState<BookmarkRow[]>([]);
 
   useFocusEffect(useCallback(() => {
-    getBookmarksFull().then(setItems);
+    bookmarkStore.getBookmarksFull().then(setItems);
   }, []));
 
   const open = (slug: string, title: string) =>
@@ -35,7 +33,7 @@ export default function ReadingListScreen() {
       {
         text: 'Remove', style: 'destructive',
         onPress: async () => {
-          await toggleBookmark(slug, title);
+          await bookmarkStore.toggleBookmark(slug, title);
           setItems(prev => prev.filter(i => i.slug !== slug));
         },
       },
@@ -48,8 +46,8 @@ export default function ReadingListScreen() {
   };
 
   const sendToZotero = async (item: BookmarkRow) => {
-    const { apiKey, userId } = await getZoteroPrefs();
-    if (!apiKey || !userId) {
+    const prep = await prepareZoteroSend(item.slug);
+    if (prep.status === 'not_configured') {
       Alert.alert(
         'Zotero not configured',
         'Add your Zotero API key and user ID in Settings.',
@@ -60,15 +58,10 @@ export default function ReadingListScreen() {
       );
       return;
     }
-    const annotations = await getAnnotationsForSlug(item.slug);
+    const { apiKey, userId, annotations } = prep;
     const result = await exportToZotero(apiKey, userId, item, annotations);
     if (result === 'ok') {
-      const versionCount = new Set(annotations.map(a => a.content_hash ?? '__current__')).size;
-      const versionNote = versionCount > 1 ? ` across ${versionCount} versions` : '';
-      const msg = annotations.length > 0
-        ? `"${item.title}" and ${annotations.length} highlight${annotations.length > 1 ? 's' : ''}${versionNote} added to your Zotero library.`
-        : `"${item.title}" was added to your Zotero library.`;
-      Alert.alert('Saved to Zotero', msg);
+      Alert.alert('Saved to Zotero', zoteroSavedMessage(item.title, annotations));
     } else if (result === 'auth_error') {
       Alert.alert('Auth error', 'Check your Zotero API key in Settings.');
     } else {

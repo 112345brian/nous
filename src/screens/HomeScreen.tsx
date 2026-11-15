@@ -9,12 +9,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import {
-  searchEntries, getRecentSlugs, getBookmarks, getAllAnnotations,
-  toggleBookmark, getAllEntries, forceSetReadProgress,
-} from '../services/db';
-import type { EntrySummary } from '../types';
-import type { AnnotationWithTitle } from '../services/db';
+import { libraryRead, bookmarkStore, readerState, loadHomeData } from '../composition';
+import { groupAnnotationsByArticle } from '../utils/annotationGroups';
+import { recentWithoutBookmarks, toggledReadProgress } from '../utils/homeLists';
+import type { EntrySummary, AnnotationWithTitle } from '../types';
 import type { RootStackParamList } from '../../App';
 import { colors, themedStyles, roleMap, getScheme } from '../theme/tokens';
 
@@ -69,12 +67,6 @@ function IconDots({ size = 21, color = C.textHint }: { size?: number; color?: st
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
-
-interface ArticleGroup {
-  slug: string;
-  title: string | null;
-  items: AnnotationWithTitle[];
-}
 
 type BrowseSectionItem =
   | { kind: 'entry'; slug: string; title: string }
@@ -199,11 +191,7 @@ export default function HomeScreen() {
   const expandedLettersRef = useRef<Set<string>>(new Set());
 
   const loadData = useCallback(async () => {
-    const [h, b, anns] = await Promise.all([
-      getRecentSlugs(12),
-      getBookmarks(),
-      getAllAnnotations(),
-    ]);
+    const { history: h, bookmarks: b, annotations: anns } = await loadHomeData();
     setHistory(h);
     setBookmarks(b);
     setAnnotations(anns);
@@ -212,7 +200,7 @@ export default function HomeScreen() {
   // Load browse entries lazily on first activation
   useEffect(() => {
     if (activeTab === 'browse' && !browseLoaded) {
-      getAllEntries().then(entries => {
+      libraryRead.getAllEntries().then(entries => {
         setBrowseEntries(entries);
         setBrowseLoaded(true);
       });
@@ -241,7 +229,7 @@ export default function HomeScreen() {
     }
     setSearching(true);
     debounce.current = setTimeout(async () => {
-      const r = await searchEntries(text, 60);
+      const r = await libraryRead.searchEntries(text, 60);
       setResults(r);
       setSearching(false);
     }, 150);
@@ -273,17 +261,17 @@ export default function HomeScreen() {
   const open = (slug: string, title: string) => nav.navigate('Article', { slug, title });
 
   const handleIconPress = async (item: EntrySummary) => {
-    await toggleBookmark(item.slug, item.title);
+    await bookmarkStore.toggleBookmark(item.slug, item.title);
     loadData();
   };
 
   const handleIconLongPress = (item: EntrySummary) => {
-    const isRead = (item.read_progress ?? 0) >= 1;
+    const isRead = toggledReadProgress(item.read_progress) === 0;
     Alert.alert(item.title, undefined, [
       {
         text: isRead ? 'Mark as Unread' : 'Mark as Read',
         onPress: async () => {
-          await forceSetReadProgress(item.slug, isRead ? 0 : 1);
+          await readerState.forceSetReadProgress(item.slug, toggledReadProgress(item.read_progress));
           loadData();
         },
       },
@@ -292,18 +280,9 @@ export default function HomeScreen() {
   };
 
   const bookmarkSlugs = new Set(bookmarks.map(b => b.slug));
-  const recentHistory = history.filter(h => !bookmarkSlugs.has(h.slug));
+  const recentHistory = recentWithoutBookmarks(history, bookmarks);
 
-  const grouped = useMemo<ArticleGroup[]>(() => {
-    const map = new Map<string, ArticleGroup>();
-    for (const ann of annotations) {
-      if (!map.has(ann.slug)) {
-        map.set(ann.slug, { slug: ann.slug, title: ann.article_title, items: [] });
-      }
-      map.get(ann.slug)!.items.push(ann);
-    }
-    return Array.from(map.values());
-  }, [annotations]);
+  const grouped = useMemo(() => groupAnnotationsByArticle(annotations), [annotations]);
 
   const toggleParent = useCallback((label: string) => {
     setExpandedParents(prev => {

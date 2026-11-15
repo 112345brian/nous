@@ -4,7 +4,7 @@ import {
   TextInput,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { Prefs } from '../services/db';
+import type { Prefs } from '../types';
 import { colors, themedStyles } from '../theme/tokens';
 
 const SCOPE_DOWNLOAD_DESC: Record<Prefs['libraryScope'], string> = {

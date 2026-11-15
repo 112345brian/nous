@@ -5,18 +5,13 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { getAllAnnotations } from '../services/db';
-import type { AnnotationWithTitle } from '../services/db';
+import { annotationStore } from '../composition';
+import { groupAnnotationsByArticle } from '../utils/annotationGroups';
+import type { AnnotationWithTitle } from '../types';
 import type { RootStackParamList } from '../../App';
 import { colors, themedStyles } from '../theme/tokens';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
-
-interface ArticleGroup {
-  slug: string;
-  title: string | null;
-  items: AnnotationWithTitle[];
-}
 
 const COLOR_LABELS: Record<string, string> = {
   '#fbbf24': '#fbbf24',
@@ -37,22 +32,13 @@ export default function AnnotationsScreen() {
   const [loading, setLoading] = useState(true);
 
   useFocusEffect(useCallback(() => {
-    getAllAnnotations().then(anns => {
+    annotationStore.getAllAnnotations().then(anns => {
       setAnnotations(anns);
       setLoading(false);
     });
   }, []));
 
-  const grouped = useMemo<ArticleGroup[]>(() => {
-    const map = new Map<string, ArticleGroup>();
-    for (const ann of annotations) {
-      if (!map.has(ann.slug)) {
-        map.set(ann.slug, { slug: ann.slug, title: ann.article_title, items: [] });
-      }
-      map.get(ann.slug)!.items.push(ann);
-    }
-    return Array.from(map.values());
-  }, [annotations]);
+  const grouped = useMemo(() => groupAnnotationsByArticle(annotations), [annotations]);
 
   const open = (slug: string, title: string) =>
     nav.navigate('Article', { slug, title });

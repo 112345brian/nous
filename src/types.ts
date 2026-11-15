@@ -91,3 +91,29 @@ export type DownloadProgress = {
   total: number;
   current: string;
 };
+
+// ── Shapes the UI-facing stores return (see the stores in src/core/ports.ts) ──
+
+/** First-run and settings preferences, kept in the `meta` table. */
+export interface Prefs {
+  homeMode: 'search' | 'continue';
+  downloadAll: boolean;
+  libraryScope: LibraryScope;
+  seedUrl: string;
+}
+
+/** A reading-list row: the bookmark joined with what the entries table knows about it. */
+export interface BookmarkRow {
+  slug: string;
+  title: string;
+  saved_at: number;
+  notes: string | null;
+  author: string | null;
+  pub_date: string | null;
+  cached_at: number | null;
+}
+
+/** A highlight with the title of its article (null when the entry is not in the library). */
+export interface AnnotationWithTitle extends Annotation {
+  article_title: string | null;
+}

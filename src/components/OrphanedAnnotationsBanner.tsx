@@ -4,8 +4,7 @@ import {
   Modal, FlatList, Pressable, Alert, ActivityIndicator,
 } from 'react-native';
 import type { Annotation } from '../types';
-import { reanchorAll } from '../utils/reanchor';
-import { updateAnnotationAnchor, deleteAnnotations } from '../services/db';
+import { reanchorOrphans, deleteOrphans } from '../composition';
 import { colors, themedStyles } from '../theme/tokens';
 
 interface Props {
@@ -26,26 +25,14 @@ export default function OrphanedAnnotationsBanner({
 
   const handleReanchorAll = async () => {
     setReanchoring(true);
-    const results = reanchorAll(localAnns, currentContent);
-    const succeeded = results.filter(r => r.found);
-    const failed = results.filter(r => !r.found);
-
-    // Persist re-anchored annotations
-    await Promise.all(
-      succeeded.map(r => updateAnnotationAnchor(r.id, r.newText, currentHash))
-    );
-
-    const successIds = succeeded.map(r => r.id);
+    // Finds each highlight in the new text and saves the ones that are found.
+    const { succeededIds: successIds, failed, message } = await reanchorOrphans(localAnns, currentContent, currentHash);
     onResolved(successIds);
     setLocalAnns(prev => prev.filter(a => !successIds.includes(a.id)));
 
-    const msg =
-      succeeded.length === results.length
-        ? `All ${succeeded.length} highlight${succeeded.length > 1 ? 's' : ''} re-anchored to the new version.`
-        : `${succeeded.length} re-anchored. ${failed.length} could not be found in the new version.`;
-    Alert.alert('Re-anchor complete', msg);
+    Alert.alert('Re-anchor complete', message);
     setReanchoring(false);
-    if (failed.length === 0) setShowSheet(false);
+    if (failed === 0) setShowSheet(false);
   };
 
   const handleDeleteAll = () => {
@@ -58,7 +45,7 @@ export default function OrphanedAnnotationsBanner({
           text: 'Delete All', style: 'destructive',
           onPress: async () => {
             const ids = localAnns.map(a => a.id);
-            await deleteAnnotations(ids);
+            await deleteOrphans(ids);
             onResolved(ids);
             setLocalAnns([]);
             setShowSheet(false);
@@ -69,7 +56,7 @@ export default function OrphanedAnnotationsBanner({
   };
 
   const handleDeleteOne = async (id: number) => {
-    await deleteAnnotations([id]);
+    await deleteOrphans([id]);
     onResolved([id]);
     setLocalAnns(prev => prev.filter(a => a.id !== id));
     if (localAnns.length === 1) setShowSheet(false);
