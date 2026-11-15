@@ -42,28 +42,21 @@ dependencies as parameters (ports), every adapter in `src/services`, one composi
 - Do not merge another session's branch unless the user says so.
 - Licensing (`AGENTS.md`, `NOTICE.md`): never bundle SEP text or InPhO data.
 
-## Open items (the known remainder, section 8 of the audit)
+## Status: finished
 
-1. **Make `src/services/db.ts` an injected instance.** It holds the connection (`_open`,
-   `_closing`) and two caches (`metaCache`, `_linkCache`) and composes the core's migration
-   runner and merge rules over its own handle (the two recorded RC3 exceptions:
-   `services/db.ts` and the re-export `services/migrations.ts`). Plan: a
-   `createDb({ migrate, mergeAnnotation, mergeRead, ... })` factory; the root builds it and passes
-   `getDb` to `graphDb`, `seedImport` and the rest; delete the re-export; empty
-   `WIRING_EXCEPTIONS`. Largest remaining change.
-2. Two lazily initialised adapters keep state by design: `services/texToSvg.ts` (MathJax engine)
-   and `services/secureSecrets.ts` (lazy `require`, must stay lazy). Leave unless item 1 changes
-   the picture.
-3. Suspected bugs, pinned in tests but NOT fixed (section 7 of the audit): a failed download counts
-   as done; an offline sync still records `last_deep_sync`; the article-request abort timer is
-   cleared before the body is read; an offline first launch stamps the bundled seed as fresh.
-   Each has a test that pins the current behavior: flip it when you fix.
-4. Not merged on purpose: `origin/new-spinner` (older, unrelated UI feature touching HomeScreen and
-   GraphScreen); `claude/heuristic-torvalds-bc24e0` (only pins `react-native-worklets`, already pinned).
-5. `scripts/test-download.mjs`, `scripts/buildEntrySeed.js`, `scripts/auditCorpus.cjs` still carry
-   copies of the page-extraction helpers (canonical in `src/utils/sepPage.ts`).
+Done on `claude/core-handoff-docs-0904e3` (cut from `main`, then merged `claude/laughing-maxwell-cbbfd8`):
 
-## Next step
+1. **`services/db.ts` is an injected instance** (`createDb(deps)`, built once in `composition.ts`).
+   Migration runner, merge rules, clock, uid, secure store and bundled link map are dependencies.
+   `getDb`/`closeDb` are handed to `graphDb` and the seed import. `services/migrations.ts` is deleted,
+   `WIRING_EXCEPTIONS` is empty. Tests: `helpers/testDb.ts`, `helpers/mockDbModule.ts`, `db.instance.test.ts`.
+2. `texToSvg.ts` and `secureSecrets.ts` keep their lazy state by design (unchanged).
+3. The four pinned bugs are fixed, each with its test flipped: failed downloads no longer count as
+   done, an all-failed sync no longer records `last_deep_sync`, the abort timer now covers the body,
+   and the bundled seed is no longer stamped as a fresh index.
+4. Not merged on purpose, as before: `origin/new-spinner`, `claude/heuristic-torvalds-bc24e0`.
+5. The script copies of the page helpers stay (plain node cannot import TS) but
+   `src/utils/__tests__/scriptHelpersDrift.test.ts` now fails if one drifts.
 
-The parent session (`claude/repo-architecture-review-da3bba`) merges this branch. After that: item 1,
-then item 3 one bug at a time (each with its pinned test flipped).
+Still open (small): a non-numeric `index_refreshed_at` counts as fresh forever; `~` expansion of the
+sync folder needs a device check (both in audit section 7).

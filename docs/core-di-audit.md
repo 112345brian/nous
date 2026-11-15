@@ -208,20 +208,18 @@ Verified against the code. Please fold these into the draft.
   device `~/Sync` likely resolves to `file://Sync/sep_user.json` (not a valid URI). Needs a
   device check. With the new `SyncEnv`, the fix is to pass a real home directory from the
   adapter (for example from `expo-file-system` `Paths`).
-- **Suspected, not fixed (behaviour pinned in `refreshIndex.test.ts`):** after an offline
+- **Fixed (test flipped in `refreshIndex.test.ts`):** after an offline
   first launch the bundled seed is stamped as a successful refresh
   (`index_refreshed_at = now`), so the app will not fetch the real index again for a week.
   The seed has no `parent_label`, so until then the browse list has no parent grouping and
-  the link index is built from seed titles only. Probable fix: do not stamp the time when the
-  entries came from the seed.
+  the link index is built from seed titles only. The time is no longer stamped when the
+  entries came from the seed, so the next launch fetches the real index.
 - **Suspected, not fixed (pinned):** a non-numeric `index_refreshed_at` value is treated as
   fresh forever (`now - NaN > interval` is false), unless the library is empty.
-- **Suspected, not fixed (behaviour kept):** the 30 s abort timer in the article request is
+- **Fixed (new test in `fetchAndCache.test.ts`):** the 30 s abort timer in the article request is
   cleared as soon as the response headers arrive (`finally { clearTimeout }`), before the body
   is read. A connection that stalls mid-body is therefore never aborted, and the call (and the
-  article screen waiting on it) can hang. Probable fix: keep the timer until `res.text()` has
-  resolved. Pinned by `fetchAndCache.test.ts` ("the timeout timer is cleared once the response
-  arrives").
+  article screen waiting on it) can hang. The timer is now cleared only after `res.text()` resolves (article and notes requests).
 - **Hazard removed:** `completeArticleMath` and `substitutemath` shared one global-flag regex
   (`MATH_SUBST_RE`) and each had to reset `lastIndex = 0` before use; forgetting that in
   either makes `test`/`exec` skip matches. The completion side now uses the stateless
@@ -231,13 +229,13 @@ Verified against the code. Please fold these into the draft.
 - **Behaviour to know (pinned):** `completeArticleMath(slug, html)` returns the in-flight
   promise for that slug even if called with a different `html`, and a completion that finds no
   TeX left in an unchanged article counts as done and notifies listeners.
-- **Suspected, not fixed (pinned in `downloadSync.test.ts`):** in both `downloadAll` and
+- **Fixed (tests flipped in `downloadSync.test.ts`):** in both `downloadAll` and
   `syncCachedArticles` an article that fails to download is counted as done (the result of the
   fetch is never inspected), so progress reaches 100% even if everything failed. Worse,
   `syncCachedArticles` then records `last_deep_sync`, which `App.tsx` uses to decide when to
   sync next, so a sync run offline marks the library as freshly synced and the next auto-sync
-  waits two to seven days. Probable fix: count only successes and record the time only if at
-  least one article was refreshed (or report failures to the caller).
+  waits two to seven days. Now only successes count, and `last_deep_sync` is recorded unless every article
+  failed.
 - **Fixed upstream (`fix-math-gap`):** `downloadAll` used to cache math articles as raw TeX and
   record nothing in `math_pending`, while `backfillMathInline`'s pass ran once ever, so articles
   downloaded afterwards kept their raw TeX. A `skipMath` article is now queued and drained by
@@ -260,26 +258,29 @@ the thing it wraps. What is left:
 
 | Where | State | Why it stays |
 |---|---|---|
-| `services/db.ts` | the one connection (`_open`, `_closing`), `metaCache`, `_linkCache` | It is the SQLite adapter. Every other adapter calls `getDb()`. Making it an injected instance means threading that instance through `graphDb`, `seedImport` and the rest, a separate change. |
+| `services/db.ts` (`createDb`) | the one connection (`_open`, `_closing`), `metaCache`, `_linkCache`: **instance state**, no module state | It is the SQLite adapter. The root builds the one instance and passes `getDb`/`closeDb` to `graphDb` and the seed import. |
 | `services/texToSvg.ts` | the lazily built MathJax document (`_doc`, `_adaptor`, `_initError`) | The in-process MathJax engine behind the flagged Hermes spike: a lazily initialised engine is what an adapter is. |
 | `services/secureSecrets.ts` | the lazily required `expo-secure-store` module (`mod`) | It throws at import when the native module is not linked, so the `require` must stay lazy. |
 
-**Two recorded exceptions to RC3 ("only the root wires core use cases").** `services/db.ts`
-calls the core's migration runner and merge rules over its own connection when it opens and when
-it imports user data, and `services/migrations.ts` is a one-line re-export of the core runner for
-`graphDb.ts`. They take a database handle, so they belong in the core; the adapter composes them
-over the handle it owns because it cannot import the root (RC2). The way out is the same change
-as above: the root creates the database instance and passes the migrations and merge rules in.
+**No exceptions to RC3.** `services/db.ts` is `createDb(deps)`: the migration runner, the merge
+rules, the clock, the uid source, the secure store and the bundled link map are parameters, and
+`composition.ts` supplies them. `services/graphDb.ts` and the seed import receive their connection
+(and, for graphDb, the migration runner) from the root. `services/migrations.ts` is gone and
+`WIRING_EXCEPTIONS` is empty. Tests build an instance with `services/__tests__/helpers/testDb.ts`;
+tests that fake the module wrap their fake in `helpers/mockDbModule.ts`.
 
 **Left alone on purpose.**
 
 - `scripts/test-download.mjs`, `scripts/buildEntrySeed.js` and `scripts/auditCorpus.cjs` carry
   their own copies of the page-extraction helpers (now canonical in `src/utils/sepPage.ts`).
-  They are build scripts outside the app.
+  They are build scripts run by plain node, which cannot import the TypeScript, so the copies
+  stay; `scriptHelpersDrift.test.ts` runs each copy against the canonical on the same inputs and
+  fails when one drifts (it found, and the change fixed, a `test-download.mjs` copy that did not
+  decode numeric or named entities).
 - `origin/new-spinner`, an older unrelated UI feature (an animated logo), was not merged.
-- The suspected bugs in section 7 that were pinned in tests but not fixed (a failed download
-  counts as done; an offline sync still records `last_deep_sync`; the article-request abort timer
-  is cleared before the body is read; an offline first launch stamps the bundled seed as fresh).
+- Still open from section 7: a non-numeric `index_refreshed_at` is treated as fresh forever, and
+  the `~` sync-folder expansion needs a device check. The four bugs the earlier pass left pinned
+  are fixed (see section 7).
 
 ### What the parent's new code added to the picture
 
@@ -299,7 +300,7 @@ as above: the root creates the database instance and passes the migrations and m
 |---|---|---|
 | `downloadNotification.ts`: module `state`, `Date.now`, throttle | `core/downloadNotifier.ts` + `ProgressNotifier`/`ProgressSink` ports; clock injected | Android/iOS calls and the 8 s `setTimeout` dismiss, in `createPlatformProgressSink()` (platform calls) |
 | `prefetch.ts`: module `attempted`, NetInfo, InteractionManager, `./db` | `core/prefetch.ts` + `Connectivity`, `Interactions`, `Delay`, `LinkLookup`; `attempted` is instance state | `netInfoConnectivity`, `rnInteractions`; the `setTimeout` delay is built in the root |
-| `secureSecrets.ts`: lazy module `mod` | `SecretStore` port in `core/ports.ts`; `secureSecretStore` adapter | The lazy `require` of `expo-secure-store` (it throws at import when unlinked). `db.ts` (not this slice) still imports the named functions; routing it through a `SecretStore` passed in from the root is for whoever owns `db.ts`. There is no logic worth a core module: every function is "call the platform, turn a failure into a return value". |
+| `secureSecrets.ts`: lazy module `mod` | `SecretStore` port in `core/ports.ts`; `secureSecretStore` adapter | The lazy `require` of `expo-secure-store` (it throws at import when unlinked). `db.ts` now takes the secure store as a dependency from the root. There is no logic worth a core module: every function is "call the platform, turn a failure into a return value". |
 
 ## UI stores and use cases (the screens off the SQLite adapter)
 
@@ -343,7 +344,7 @@ Pure rules extracted to `src/utils` (not use cases): `annotationGroups`, `homeLi
 |---|---|---|
 | `mergeAnnotation`, `ImportedAnnotation` | `core/annotationMerge.ts` | Takes `SqlRunner` (new port in `ports.ts`) and `MergeDeps` (`Clock` + `newUid`); the adapter supplies `Date.now` and the `Math.random` uid generator (`newUid` now lives in `db.ts`). |
 | `mergeRead`, `ImportedRead` | `core/readsMerge.ts` | `READS_UNIQUE_INDEX_SQL` is schema data and now sits in `services/coreMigrations.ts`. |
-| `runMigrations`, `userVersionStore`, `tableVersionStore`, `Migration`, `VersionStore` | `core/migrations.ts` | Database is the `MigrationDb` port. `services/migrations.ts` is a re-export kept only for `graphDb.ts` (recorded RC3 exception). |
+| `runMigrations`, `userVersionStore`, `tableVersionStore`, `Migration`, `VersionStore` | `core/migrations.ts` | Database is the `MigrationDb` port. The old `services/migrations.ts` re-export is deleted; `graphDb` gets the runner from the root. |
 | `buildTree`, session grouping, 30-minute session rule | `utils/readSessions.ts` | `getSessions` / `recordRead` call them. |
 | `scopeFilter`, `countWords` | `utils/libraryScope.ts` | |
 | `resolveEntryHash` | `utils/contentHash.ts` | Still re-exported from `db.ts` (ArticleScreen imports it there). |

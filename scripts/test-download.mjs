@@ -6,7 +6,7 @@
 
 const BASE = 'https://plato.stanford.edu';
 
-// ── Extraction helpers (mirrors catalog.ts) ──────────────────────────────────
+// ── Extraction helpers (copies of src/utils/sepPage.ts; src/utils/__tests__/scriptHelpersDrift.test.ts keeps them in step) ──────────────────────────────────
 
 function extractById(html, id) {
   const start = new RegExp(`<(div|nav|section|ol|ul)[^>]*\\bid="${id}"[^>]*>`, 'i');
@@ -29,18 +29,40 @@ function extractById(html, id) {
 
 function extractMetaContent(html, property) {
   const m = html.match(new RegExp(`<meta property="${property}" content="([^"]+)"`));
-  return m ? m[1].trim() : null;
+  return m ? decodeEntities(m[1].trim()) : null;
 }
 
 function extractTitle(html) {
   const m = html.match(/<title>([^<]+?)\s*\(Stanford/i)
          ?? html.match(/<h1[^>]*class="[^"]*pagetitle[^"]*"[^>]*>([^<]+)/i);
-  return m ? m[1].trim() : null;
+  return m ? decodeEntities(m[1].trim()) : null;
 }
 
+const NAMED_ENTITIES = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  eacute: 'é', egrave: 'è', ecirc: 'ê', euml: 'ë',
+  aacute: 'á', agrave: 'à', acirc: 'â', auml: 'ä', aring: 'å', aelig: 'æ',
+  oacute: 'ó', ograve: 'ò', ocirc: 'ô', ouml: 'ö', oslash: 'ø',
+  uacute: 'ú', ugrave: 'ù', ucirc: 'û', uuml: 'ü',
+  iacute: 'í', igrave: 'ì', icirc: 'î', iuml: 'ï',
+  ntilde: 'ñ', ccedil: 'ç', szlig: 'ß', yacute: 'ý',
+  Eacute: 'É', Egrave: 'È', Ecirc: 'Ê', Euml: 'Ë',
+  Aacute: 'Á', Agrave: 'À', Acirc: 'Â', Auml: 'Ä', Aring: 'Å', AElig: 'Æ',
+  Oacute: 'Ó', Ograve: 'Ò', Ocirc: 'Ô', Ouml: 'Ö', Oslash: 'Ø',
+  Uacute: 'Ú', Ugrave: 'Ù', Ucirc: 'Û', Uuml: 'Ü',
+  Iacute: 'Í', Igrave: 'Ì', Icirc: 'Î', Iuml: 'Ï',
+  Ntilde: 'Ñ', Ccedil: 'Ç', Yacute: 'Ý',
+  // Typographic
+  mdash: '—', ndash: '–', lsquo: '‘', rsquo: '’',
+  ldquo: '“', rdquo: '”', hellip: '…', middot: '·',
+  laquo: '«', raquo: '»', bull: '•', prime: '′',
+};
+
 function decodeEntities(s) {
-  return s.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>')
-          .replace(/&quot;/g,'"').replace(/&#039;/g,"'").replace(/&nbsp;/g,' ');
+  return s
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&([a-zA-Z]+);/g, (m, name) => NAMED_ENTITIES[name] ?? m);
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

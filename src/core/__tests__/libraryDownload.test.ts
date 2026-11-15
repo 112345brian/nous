@@ -82,10 +82,10 @@ describe('downloadAll with fakes', () => {
     expect(w.log.some(l => l.startsWith('sleep:'))).toBe(false);
   });
 
-  test('articles that fail still count as done (the result is not inspected)', async () => {
+  test('articles that fail do not count as done (the result is inspected)', async () => {
     const w = world({ uncached: refs(2), results: { a0: false } });
     await downloadAll(w.dl, w.onProgress);
-    expect(w.progress.map(p => p.done)).toEqual([0, 1, 2]);
+    expect(w.progress.map(p => p.done)).toEqual([0, 1]);
   });
 
   test('abort: checked before each group, never mid-group', async () => {
@@ -151,10 +151,20 @@ describe('syncCachedArticles with fakes', () => {
     expect(w.log).toEqual(['refresh']);
   });
 
-  test('articles that fail still count as done and the sync is still recorded', async () => {
+  test('a failed article does not count as done; the sync is recorded while any article succeeded', async () => {
     const w = world({ cached: refs(2), results: { a1: false } });
     await syncCachedArticles(w.sync, w.onProgress);
-    expect(w.progress.map(p => p.done)).toEqual([1, 2]);
+    expect(w.progress.map(p => p.done)).toEqual([1]);
     expect(w.meta.has('last_deep_sync')).toBe(true);
+  });
+
+  test('every article failing records nothing; an empty library still records', async () => {
+    const all = world({ cached: refs(3), results: { a0: false, a1: false, a2: false } });
+    await syncCachedArticles(all.sync, all.onProgress);
+    expect(all.progress).toEqual([]);
+    expect(all.meta.has('last_deep_sync')).toBe(false);
+    const none = world({ cached: [] });
+    await syncCachedArticles(none.sync, none.onProgress);
+    expect(none.meta.has('last_deep_sync')).toBe(true);
   });
 });

@@ -44,7 +44,7 @@ const KNOWN = new Set([
   'em','i','strong','b','a','sup','sub','code','tt','br','span',
 ]);
 
-// ── mirror of catalog.ts extractById ────────────────────────────────────────
+// ── copy of src/utils/sepPage.ts extractById (drift test: src/utils/__tests__/scriptHelpersDrift.test.ts) ────────────────────────────────────────
 function extractById(html, id) {
   const start = new RegExp(`<(div|nav|section|ol|ul)[^>]*\\bid="${id}"[^>]*>`, 'i');
   const m = start.exec(html);

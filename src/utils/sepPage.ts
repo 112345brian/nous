@@ -55,6 +55,7 @@ const ENTITY_MAP: Record<string, string> = {
   Ntilde: 'Ñ', Ccedil: 'Ç', Yacute: 'Ý',
   mdash: '—', ndash: '–', lsquo: '‘', rsquo: '’',
   ldquo: '“', rdquo: '”', hellip: '…', middot: '·',
+  laquo: '«', raquo: '»', bull: '•', prime: '′',
 };
 
 export function decodeEntities(s: string): string {
