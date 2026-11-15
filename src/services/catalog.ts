@@ -86,7 +86,8 @@ async function substitutemath(html: string, priority: MathPriority | null = 'cur
 // parser renders it as monospace); equations are rendered afterwards and the
 // article is rewritten with <math-i> hash references. Slugs whose math is not
 // done yet are tracked in a meta key so an interrupted run resumes at launch
-// (see resumePendingMath, called from backfillMathInline).
+// (see resumePendingMath, run at launch and after every bulk download). Every
+// article cached with TeX unrendered (deferred or skipMath) is on this list.
 const MATH_PENDING_KEY = 'math_pending';
 let pendingChain: Promise<void> = Promise.resolve();
 function updatePending(fn: (slugs: Set<string>) => void): Promise<void> {
@@ -210,34 +211,6 @@ export async function backfillMathHashFormat(): Promise<void> {
   await setMeta('math_hash_format_v1', '1');
 }
 
-// One-time startup backfill: run substitutemath on all already-cached math
-// articles so their stored content_html has SVGs instead of raw TeX.
-// Runs entirely from the local DB — no network. Guarded by a meta key.
-export async function backfillMathInline(): Promise<void> {
-  // Finish any deferred per-article math from a previous run first.
-  await resumePendingMath().catch(() => {});
-  // v2: v1 ran before the WebView renderer existed and converted nothing
-  // (MathJax can't run on Hermes), so re-run once against the real renderer.
-  const done = await getMeta('math_inline_v2');
-  if (done) return;
-  const articles = await getMathArticleHtml();
-  for (const article of articles) {
-    await yieldThenMathMayRun('background');
-    try {
-      // Re-read: the snapshot above may be hours old if we were paused, and a
-      // reader-triggered completion may have rewritten this article since.
-      const current = (await getEntryHtml(article.slug)) ?? article.content_html;
-      const updated = await substitutemath(current, 'background');
-      if (updated !== current) {
-        await updateArticleHtml(article.slug, updated);
-      }
-    } catch {
-      // non-fatal — article will fall back to legacy monospace TeX
-    }
-  }
-  await setMeta('math_inline_v2', '1');
-}
-
 // One-time startup backfill: pre-parse AST for all cached articles that don't
 // have one yet (articles cached before this feature, or updated by math backfill).
 export async function backfillAst(): Promise<void> {
@@ -314,7 +287,10 @@ export function downloadAll(
   signal?: AbortSignal,
   scope: 'all' | 'sep' | 'owl' = 'all'
 ): Promise<void> {
-  return withDownloadHold(() => downloadAllUnheld(onProgress, signal, scope));
+  // The hold is released before the drain starts; resumePendingMath still pauses
+  // per article for any hold/reader activity, so it never runs during a download.
+  return withDownloadHold(() => downloadAllUnheld(onProgress, signal, scope))
+    .finally(() => { void resumePendingMath().catch(() => {}); });
 }
 
 async function downloadAllUnheld(
@@ -332,8 +308,8 @@ async function downloadAllUnheld(
   // Emit once upfront so callers always see the real total, even on a fully-cached library.
   onProgress({ done, total, current: '' });
 
-  // Skip math rendering during bulk download — backfillMathInline runs after
-  // and handles all math articles in one pass. Rendering math inline here
+  // Skip math rendering during bulk download — each article is queued on
+  // math_pending and drained afterwards (resumePendingMath, background priority). Rendering math inline here
   // requires a WebView round-trip per equation and turns a 20-min download
   // into a 2-hour one for a library with ~450 math articles.
   const CONCURRENCY = 6;
@@ -388,10 +364,13 @@ async function syncCachedArticlesUnheld(
 //                    without waiting for MathJax.
 //   awaitMath      — render equations first (old behavior); for bulk sync where
 //                    nobody is waiting on the first paint.
-//   skipMath       — leave raw TeX; bulk download defers to backfillMathInline.
+//   skipMath       — leave raw TeX and queue the slug on math_pending only; no
+//                    rendering is started (bulk download; resumePendingMath drains).
+//   deferPriority  — priority of the deferred render (default 'current'; prefetch
+//                    passes 'background' so a neighbour never competes with the reader).
 export async function fetchAndCacheArticle(
   slug: string,
-  opts: { skipMath?: boolean; awaitMath?: boolean } = {},
+  opts: { skipMath?: boolean; awaitMath?: boolean; deferPriority?: MathPriority } = {},
 ): Promise<boolean> {
   try {
     const controller = new AbortController();
@@ -419,7 +398,7 @@ export async function fetchAndCacheArticle(
 
     const linkedHtml = perf.timeSync(slug, 'linkify', () => linkifyHtml(contentHtml));
     const hasMath = linkedHtml.includes('\\(') || linkedHtml.includes('\\[');
-    // Substitute math unless caller opted out (bulk download defers to backfillMathInline).
+    // Substitute math unless caller opted out (bulk download queues it on math_pending).
     const deferMath = hasMath && !opts.skipMath && !opts.awaitMath;
     const finalHtml = hasMath && !opts.skipMath && opts.awaitMath ? await perf.time(slug, 'math', () => substitutemath(linkedHtml, null)) : linkedHtml;
     // Footnote text lives on a sibling notes.html page; fetch it so footnotes
@@ -442,7 +421,11 @@ export async function fetchAndCacheArticle(
     if (deferMath) {
       // Fire-and-forget: record the debt first so a kill mid-render resumes at
       // next launch, then render. Errors stay inside completeArticleMath.
-      updatePending(s => { s.add(slug); }).then(() => completeArticleMath(slug, finalHtml));
+      const priority = opts.deferPriority ?? 'current';
+      updatePending(s => { s.add(slug); }).then(() => completeArticleMath(slug, finalHtml, priority));
+    } else if (hasMath && opts.skipMath) {
+      // Record the debt only; resumePendingMath renders it later at background priority.
+      await updatePending(s => { s.add(slug); });
     }
     return true;
   } catch {

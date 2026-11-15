@@ -19,7 +19,7 @@ const attempted = new Set<string>();
 /**
  * Once the reader has stayed on `slug` for a while (and interactions have
  * settled), quietly cache a few of its uncached outgoing-link targets, one at a
- * time. Math is skipped (backfillMathInline fills it in later). Returns a
+ * time. Math uses the deferred path at background priority: queued on math_pending, rendered when the reader is quiet, and swapped in via onMathReady if the article is open by then. Returns a
  * cancel function: call it on navigation/unmount. Never throws.
  */
 export function startPrefetch(slug: string): () => void {
@@ -46,7 +46,7 @@ export function startPrefetch(slug: string): () => void {
       if (cancelled) return;
       const targets = selectPrefetchTargets(slug, links, attempted);
       await runPrefetch(targets, {
-        fetchOne: s => fetchAndCacheArticle(s, { skipMath: true }),
+        fetchOne: s => fetchAndCacheArticle(s, { deferPriority: 'background' }),
         sleep,
         shouldContinue: () => !cancelled,
         onAttempt: s => { attempted.add(s); },
