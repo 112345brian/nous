@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  ActivityIndicator, useWindowDimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { runTests, getTestList } from '../tests/runTests';
@@ -12,7 +12,6 @@ type Phase = 'idle' | 'running' | 'done';
 
 export default function TestRunnerScreen() {
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
   const scrollRef = useRef<ScrollView>(null);
 
   const [phase, setPhase] = useState<Phase>('idle');

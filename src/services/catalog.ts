@@ -1,4 +1,4 @@
-import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getSlugsByCacheStatus, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, getMathArticleHtml, updateArticleHtml, setArticleAst, getUncachedAstSlugs, getEntryHtml, putMath, putMathBatch, getMathSvgMap, setEntryNotes } from './db';
+import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getSlugsByCacheStatus, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, getMathArticleHtml, updateArticleHtml, setArticleAst, getUncachedAstSlugs, getEntryHtml, putMath, setEntryNotes } from './db';
 import { linkifyHtml } from '../utils/linkifier';
 import seedEntries from '../assets/entry-seed.json';
 import { ensureMath } from './mathCache';
@@ -405,7 +405,7 @@ export async function fetchAndCacheArticle(
     if (!res.ok) return false;
     const html = await perf.time(slug, 'fetch-body', () => res.text());
 
-    const { title, tocHtml, preambleHtml, rawContentHtml } = perf.timeSync(slug, 'extract', () => ({
+    const { tocHtml, preambleHtml, rawContentHtml } = perf.timeSync(slug, 'extract', () => ({
       title: extractTitle(html) ?? slug,
       tocHtml: extractById(html, 'toc'),
       preambleHtml: extractById(html, 'preamble'),

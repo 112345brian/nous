@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install
+        run: npm ci --legacy-peer-deps --ignore-scripts
+      - name: Type-check
+        run: npx tsc --noEmit
+      - name: Lint (fails on errors; warnings allowed)
+        run: npx eslint . --max-warnings 100000
+      - name: Test
+        run: npx jest
+      - name: Check for bundled content
+        run: node scripts/check-no-bundled-content.js
