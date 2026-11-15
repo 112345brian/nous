@@ -74,7 +74,12 @@ const CONVERTED = [
 // RC3 exceptions: a file other than composition.ts that still wires a core use case.
 // None today: services/catalog.ts was the last one and is now adapters only. A new entry needs a
 // reason, and the check below fails if the entry stops being true.
-const WIRING_EXCEPTIONS: Array<{ file: string; reason: string }> = [];
+const WIRING_EXCEPTIONS: Array<{ file: string; reason: string }> = [
+  { file: 'src/services/db.ts',
+    reason: 'the SQLite adapter itself: it opens the connection (runMigrations over the core schema) and merges imported rows with the core merge rules; it cannot import the root (RC2), so it hands them its own handle, clock and uid source' },
+  { file: 'src/services/migrations.ts',
+    reason: 're-export of src/core/migrations for services/graphDb.ts (owned by another change); delete when graphDb imports the core path' },
+];
 
 // RC5: files outside the root that import the SQLite adapter (services/db) as a value. Shrink-only.
 // The screens, components, useBoot and ThemeProvider now take the stores (readerState, bookmarkStore,

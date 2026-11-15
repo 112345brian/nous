@@ -414,3 +414,17 @@ export interface GraphArticles {
   getPreview(slug: string): Promise<{ title: string; author: string | null; excerpt: string | null } | null>;
   getHtml(slug: string): Promise<string | null>;
 }
+
+// ── Database handle (added by the db-pure-logic slice) ──
+/** The slice of a SQLite handle that merge and migration logic needs. expo-sqlite's database satisfies it. */
+export interface SqlRunner {
+  runAsync(sql: string, params?: any[]): Promise<unknown>;
+  getFirstAsync<T>(sql: string, params?: any[]): Promise<T | null>;
+}
+
+/** What a schema migration step and the migration runner may do to the database. */
+export interface MigrationDb extends SqlRunner {
+  execAsync(sql: string): Promise<void>;
+  getAllAsync<T>(sql: string, params?: any[]): Promise<T[]>;
+  withTransactionAsync(task: () => Promise<void>): Promise<void>;
+}

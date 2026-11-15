@@ -1,5 +1,14 @@
 // Cross-device annotation merge, run against a real SQLite (node:sqlite).
-import { mergeAnnotation, type SqlRunner } from '../src/services/annotationMerge';
+import { mergeAnnotation as mergeWithDeps, type SqlRunner, type MergeDeps } from '../src/core/annotationMerge';
+
+// Date.now and Math.random are made to throw: the core must use only what it is handed.
+const DEPS: MergeDeps = { clock: { now: () => 5000 }, newUid: () => 'fixed-uid' };
+const mergeAnnotation = (db: SqlRunner, a: any) => mergeWithDeps(db, a, DEPS);
+beforeEach(() => {
+  jest.spyOn(Date, 'now').mockImplementation(() => { throw new Error('core read Date.now'); });
+  jest.spyOn(Math, 'random').mockImplementation(() => { throw new Error('core read Math.random'); });
+});
+afterEach(() => jest.restoreAllMocks());
 
 declare function require(m: string): any;
 declare const __dirname: string;
@@ -72,7 +81,7 @@ describe('mergeAnnotation', () => {
     const rows = db.all();
     expect(rows).toHaveLength(1);
     expect(rows[0].id).toBe(1);
-    expect(rows[0].uid).toMatch(/^[0-9a-f]{32}$/);
+    expect(rows[0].uid).toBe('fixed-uid');
   });
 
   test('importing the same file twice is idempotent', async () => {
@@ -99,7 +108,9 @@ describe('mergeAnnotation', () => {
     await mergeAnnotation(db, { slug: 'a', selected_text: 'x' });
     const r = db.all()[0];
     expect(r.color).toBe('#FFE566');
-    expect(r.created_at).toBe(r.updated_at);
+    expect(r.created_at).toBe(5000); // from the injected clock
+    expect(r.updated_at).toBe(5000);
+    expect(r.uid).toBe('fixed-uid'); // from the injected uid source
   });
 });
 

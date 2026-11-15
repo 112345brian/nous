@@ -1,8 +1,7 @@
 // Reads import must be idempotent; run against a real SQLite (node:sqlite).
-import {
-  mergeRead, READS_UNIQUE_INDEX_SQL,
-} from '../src/services/readsMerge';
-import type { SqlRunner } from '../src/services/annotationMerge';
+import { mergeRead } from '../src/core/readsMerge';
+import { READS_UNIQUE_INDEX_SQL } from '../src/services/coreMigrations';
+import type { SqlRunner } from '../src/core/annotationMerge';
 
 declare function require(m: string): any;
 declare const __dirname: string;
