@@ -1,16 +1,17 @@
 # Nous
 
-A philosophy reader app for Android and macOS, built to work well with the [Stanford Encyclopedia of Philosophy](https://plato.stanford.edu) and [InPhO](https://www.inphoproject.org). Built with React Native 0.81.
+A philosophy reader app for Android and macOS (an iOS target is also checked in; CI currently builds Android only), built to work well with the [Stanford Encyclopedia of Philosophy](https://plato.stanford.edu) and [InPhO](https://www.inphoproject.org). Built with React Native 0.81.
 
 ## Features
 
 - **Native renderer** — articles render as native React Native components, not a WebView. Fast scroll, real text selection, annotation highlights painted directly on matched spans.
-- **Full-text search** across all ~1,800 SEP articles and OWL ontology entries
+- **Title search** across all ~1,800 SEP articles and OWL ontology entries (prefix matching, ranked; article bodies are not searched)
 - **Offline library** — bulk-download the full library at first launch, or fetch articles on demand and cache them. Progress shown in-app and in the notification shade.
 - **Semantic graph** — related articles, influence timelines, and a zoomable graph view powered by [InPhO](https://www.inphoproject.org) data fetched per-client at runtime.
 - **Annotations** — highlight and note any passage; color-coded, searchable, exportable.
 - **Reading history** — sessions visualized as collapsible branching trees showing how you got from article to article.
-- **Inline math** — TeX equations rendered via MathJax to SVG, cached in SQLite.
+- **Inline math** — TeX equations are typeset on the device by MathJax (in a hidden WebView), deduplicated by hash and cached as SVG in SQLite. Article text shows first and equations fill in; rendering pauses while you read, scroll or download.
+- **Light and dark appearance** — Auto, Light or Dark in Settings.
 - **Table of contents** — inline TOC with section jump, sticky header.
 - **Bookmarks** and reading list.
 - **Library scope** — target SEP only, OWL only, or both.
@@ -25,7 +26,7 @@ A philosophy reader app for Android and macOS, built to work well with the [Stan
 | Storage | expo-sqlite v16, FTS5, WAL |
 | Navigation | React Navigation v7 native stack |
 | Renderer | Custom native HTML→AST parser + RN component tree |
-| Math | MathJax 3 (server-side SVG, cached in SQLite) |
+| Math | MathJax 3, rendered on-device in a hidden WebView to SVG, cached in SQLite |
 | Gestures | react-native-gesture-handler |
 
 ## Building
@@ -56,9 +57,9 @@ npx react-native run-android
 
 ## Architecture
 
-**Index:** Fetched from `plato.stanford.edu/contents.html` on first launch, refreshed weekly. Stored in SQLite with an FTS5 virtual table for full-text search.
+**Index:** Fetched from `plato.stanford.edu/contents.html` on first launch, refreshed weekly. Stored in SQLite with an FTS5 virtual table over entry titles for search.
 
-**Articles:** Fetched on demand from `plato.stanford.edu/entries/<slug>/`. HTML is parsed into a typed AST (`src/utils/sepHtml/`), stored in SQLite, and rendered natively. Inline TeX is extracted at parse time and rendered to SVG via MathJax.
+**Articles:** Fetched on demand from `plato.stanford.edu/entries/<slug>/`. HTML is parsed into a typed AST (`src/utils/sepHtml/`), stored in SQLite, and rendered natively. TeX is replaced with placeholders when an article is cached; the article is shown first and the equations are typeset afterwards on the device, stored by hash in the `math` table and reused across articles. Simple TeX can be shown as styled text instead of SVG (the tiered-math flag, off by default; see `docs/tiered-math.md`). Math work is chunked and runs only when nothing higher-priority is happening (`docs/math-throttling.md`).
 
 **InPhO graph:** Related-article edges, influence timelines, and node metadata are fetched per-client from Indiana University's InPhO API at runtime. Never bundled.
 

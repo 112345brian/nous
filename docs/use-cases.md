@@ -1,6 +1,6 @@
 # Nous — Use Cases
 
-Status: **draft, derived from reading the code on 2026-11-14**, not from a product
+Status: **draft, derived from reading the code on 2026-11-14; statuses updated after the fixes merged the same day**, not from a product
 owner. Each entry says what the app does today. Where code and README disagree,
 the code is described and the disagreement is listed at the bottom. Review this
 file, correct it, and treat it as the source of truth for the application layer.
@@ -44,16 +44,16 @@ missing behavior, see section 4.
 | ID | Use case | Summary | Code today | Status |
 |---|---|---|---|---|
 | UC-A1 | Complete first-run onboarding | Choose the home mode, library scope, whether to download everything, and an optional seed URL; mark onboarding done. | `OnboardingScreen`, `App.handleOnboardingDone`, `getMeta`/`setMeta`, `savePrefs` | ok |
-| UC-A2 | Seed the library from a URL | Replace the local database with a downloaded one (first run or from Settings). The onboarding code already saves prefs only after the import, because the import replaces the whole file. | `seedImport.importSeedFromUrl`, `closeDb` | **gap** (can erase user data) |
+| UC-A2 | Seed the library from a URL | Replace the local database with a downloaded one (first run or from Settings). The onboarding code already saves prefs only after the import, because the import replaces the whole file. | `seedImport.importSeedFromUrl`, `closeDb` | ok (user data is exported before the swap, restored after, rolled back on failure) |
 | UC-A3 | Build or refresh the entry index | If empty or stale (weekly), fetch `contents.html`, upsert entries, rebuild search and link index. | `catalog.refreshIndexIfStale`, `upsertIndexEntries` | ok |
-| UC-A4 | Run background maintenance | Backfill ASTs and math, sync cached articles, prime graph layouts, without blocking reading. | `backfillAst`, `backfillMath*`, `syncCachedArticles`, `primeGraphLayouts` | ok (being moved to an idle scheduler) |
+| UC-A4 | Run background maintenance | Backfill ASTs and math, sync cached articles, prime graph layouts, only when nothing higher-priority is happening (reading, scrolling, downloading; see `docs/math-throttling.md`). | `backfillAst`, `backfillMath*`, `syncCachedArticles`, `primeGraphLayouts` | ok (being moved to an idle scheduler) |
 
 ### B. Find something to read
 
 | ID | Use case | Summary | Code today | Status |
 |---|---|---|---|---|
 | UC-B1 | Browse the library | Alphabetical list with a letter index. | `HomeScreen`, `searchEntries('')` | ok |
-| UC-B2 | Search entry titles | Prefix search over titles, ranked. | `db.searchEntries` (FTS5 on slug and title) | **gap** (title-only; README says full-text) |
+| UC-B2 | Search entry titles | Prefix search over titles, ranked. | `db.searchEntries`, `utils/ftsQuery.buildFtsQuery` (FTS5 on slug and title) | ok (title-only by design; quotes and punctuation in the query are escaped) |
 | UC-B3 | Resume reading | Jump to the most recent article, see recents. | `HomeScreen` (`getRecentSlugs`) | ok |
 | UC-B4 | See related articles | From an article, show backlinks and outgoing links. | `getLinksTo`, `getLinksFrom`, `indexLinks` | ok |
 
@@ -63,7 +63,7 @@ missing behavior, see section 4.
 |---|---|---|---|---|
 | UC-C1 | Open an article | Show the cached copy; if absent, fetch, process and cache it, then show it. Record the read. | `ArticleScreen.load`, `fetchAndCacheArticle`, `getEntry`, `recordRead` | ok (slow first open) |
 | UC-C2 | Read with remembered position | Save scroll progress; restore it on reopen. | `setReadProgress`, `forceSetReadProgress` | ok |
-| UC-C3 | Jump within an article | Use the table of contents or an anchor link. | `TocSheet`, `parseToc`, `handleTocJump` | ok |
+| UC-C3 | Jump within an article | Use the table of contents or an anchor link. | `TocSheet`, `parseToc`, `handleTocJump` | **gap** (TOC taps may land at the top, see section 4) |
 | UC-C4 | Read a footnote | Tap a note marker to see its text in a sheet. | `FootnoteSheet`, `ensureNotesCached`, `fetchNotesHtml` | ok |
 | UC-C5 | Follow a link to another entry | Tapping an SEP link opens that entry; external links open the browser. | `handleNativeLink`, `linkifier` | ok |
 | UC-C6 | Read equations | TeX is rendered to SVG on the device, cached by hash, shown inline. | `mathRender`, `substitutemath`, `putMath`, `getMathSvgMap` | ok |
@@ -99,7 +99,7 @@ missing behavior, see section 4.
 
 | ID | Use case | Summary | Code today | Status |
 |---|---|---|---|---|
-| UC-G1 | Download the library | Download all uncached articles for the chosen scope, with progress, notification and cancel. | `catalog.downloadAll`, `downloadNotification` | ok |
+| UC-G1 | Download the library | Download all uncached articles for the chosen scope, with progress, notification and cancel. | `catalog.downloadAll`, `downloadNotification` | **gap** (downloaded math articles may keep raw TeX, see section 4) |
 | UC-G2 | Keep cached articles current | Periodic or manual deep sync of cached articles. | `syncCachedArticles` | ok |
 | UC-G3 | Free storage | Clear the article cache. | `clearArticleCache` | ok |
 | UC-G4 | Choose library scope | SEP only, OWL only or both. | `getPrefs`/`savePrefs`, `getSlugsByCacheStatus` | ok |
@@ -108,9 +108,9 @@ missing behavior, see section 4.
 
 | ID | Use case | Summary | Code today | Status |
 |---|---|---|---|---|
-| UC-H1 | Tune the reading experience | Font size, custom CSS, launch screen. | `SettingsScreen`, `readerCss`, `savePrefs` | ok |
-| UC-H2 | Configure Zotero | Store user id and API key. | `saveZoteroPrefs`, `getZoteroPrefs` | **gap** (key kept in `meta`) |
-| UC-H3 | Export user data to the sync folder | Write reads, bookmarks, annotations and prefs to `sep_user.json` in the folder the reader typed in. | `SettingsScreen.handleExport`, `dataSync.exportToSyncFolder`, `exportUserData` | **gap** (export includes secrets) |
+| UC-H1 | Tune the reading experience | Font size, custom CSS, launch screen, light or dark appearance. | `SettingsScreen`, `readerCss`, `savePrefs`, `theme/ThemeProvider` (appearance: Auto, Light or Dark) | ok |
+| UC-H2 | Configure Zotero | Store user id and API key. | `saveZoteroPrefs`, `getZoteroPrefs`, `secureSecrets` (the API key lives in secure storage) | ok |
+| UC-H3 | Export user data to the sync folder | Write reads, bookmarks, annotations and prefs to `sep_user.json` in the folder the reader typed in. | `SettingsScreen.handleExport`, `dataSync.exportToSyncFolder`, `exportUserData` | ok (explicit allowlist; secrets are never exported) |
 | UC-H4 | Import user data from the sync folder | Read that file and merge it into the local data (`handleImport` and `handleSyncNow` use the same path). | `SettingsScreen.handleImport`, `dataSync.importFromSyncFolder`, `importUserData` | ok |
 | UC-H5 | Choose auto-sync | Pick when the sync folder is synced automatically. | `SettingsScreen.setAutoSyncPref`, `handleSyncNow` | ok (behavior not verified) |
 
@@ -133,27 +133,35 @@ concrete library or module.
 | `Clock`, `Scheduler` (idle work) | A4, G2 | `Date.now`, timers, `InteractionManager` |
 
 `LibraryStore` and `UserStore` are one SQLite file today. Splitting them (content
-is replaceable, user data never is) is the clean boundary and removes the A2 gap.
+is replaceable, user data never is) is the clean boundary. The seed-import fix works around the shared file by exporting and restoring user data; splitting the file would remove the need.
 
-## 4. Known gaps behind the "gap" markers
+## 4. Gaps
 
-1. **UC-A2:** the seed import deletes `sep.db`, which also holds bookmarks,
-   annotations, reads and prefs. No caller exports and restores user data around
-   it. Reproduction test pending.
-2. **UC-B2:** `entries_fts` indexes `slug` and `title` only, so search is a title
-   prefix search, not full-text. The search query also wraps each word in quotes
-   without escaping embedded quotes, so a `"` in the query can produce an invalid
-   FTS expression (untested).
-3. **UC-H2, UC-H3:** `exportUserData` exports every `meta` row except
-   `onboarding_done`, including the Zotero API key, into the sync-folder file.
+Fixed since the first draft of this file (see git history for the commits):
+
+- **Seed import erased user data** (was UC-A2). The import now exports reads,
+  bookmarks, annotations and settings first, restores them into the new database,
+  and puts the old database back if anything fails.
+- **Zotero API key in the export** (was UC-H2, UC-H3). The export is an explicit
+  allowlist of preference keys, and the API key is kept in secure storage.
+- **Search crashed on a double quote** (UC-B2). Words are now quoted and embedded
+  quotes escaped (`src/utils/ftsQuery.ts`, tested against the real FTS5 engine).
+
+Still open:
+
+1. **UC-B2:** search covers entry titles only. That is a product limit, not a bug,
+   and the README now says so.
+2. **Math after a bulk download or prefetch** (UC-G1, UC-C1): articles cached
+   without rendering math may keep raw TeX until the pending list drains. A fix is
+   in progress.
+3. **TOC taps** (UC-C3): jumping to a heading on the shipping list path can land at
+   the top of the article. A fix is in progress.
 
 ## 5. README versus code
 
-| README says | Code does |
-|---|---|
-| "Full-text search across all ~1,800 SEP articles" | Title-only search (see UC-B2). |
-| "Math: MathJax 3 (server-side SVG, cached in SQLite)" | Rendered on the device in a hidden WebView, then cached. |
-| "A philosophy reader app for Android and macOS" | An `ios/` target is also checked in; CI builds Android only. |
+The README was corrected on the same day (title search, on-device math, iOS
+target note, appearance setting). No known disagreements remain; when you change a
+behavior listed in section 2, update the README line that describes it.
 
 ## 6. Out of scope
 

@@ -1,6 +1,7 @@
 import * as SQLite from 'expo-sqlite';
 import type { EntryRow, EntrySummary, ReadRow, ReadNode, Session, Annotation } from '../types';
 import { makeExcerpt } from '../utils/excerpt';
+import { buildFtsQuery } from '../utils/ftsQuery';
 import { mathTierStamp, TIERED_MATH_DEFAULT } from '../utils/mathTier';
 import { CORE_MIGRATIONS } from './coreMigrations';
 import { runMigrations, userVersionStore } from './migrations';
@@ -348,7 +349,7 @@ export async function searchEntries(query: string, limit = 60): Promise<EntrySum
       [limit]
     );
   }
-  const ftsQuery = query.trim().split(/\s+/).map(w => `"${w}"*`).join(' ');
+  const ftsQuery = buildFtsQuery(query) as string; // non-null: the blank case returned above
   return db.getAllAsync<EntrySummary>(
     `SELECT e.slug, e.title, e.parent_label, e.author, e.cached_at
      FROM entries_fts fts
