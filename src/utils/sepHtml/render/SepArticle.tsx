@@ -1,10 +1,21 @@
 import React, { useCallback, useImperativeHandle, useMemo, useRef } from 'react';
 import { FlatList, View, type NativeSyntheticEvent, type NativeScrollEvent } from 'react-native';
+import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ParsedArticle, Block } from '../types';
 import type { Annotation } from '../../../types';
 import { BlockView, type BlockHandlers } from './Blocks';
 import { SEP_COLORS, SEP_SIDE_PAD } from './theme';
+import { activeHeadingId, collectHeadings, sepItemType, type ListEngine } from './listHelpers';
+
+// SPIKE FLAG: 'flatlist' is the shipping engine. Flip to 'flashlist' to try
+// FlashList v2 (docs/library-research.md §5). The `listEngine` prop overrides it
+// per instance for A/B comparison and tests.
+export const SEP_LIST_ENGINE: ListEngine = 'flatlist';
+
+// Shared by both engines. (`style` on FlashList is the parent container, so it
+// must not carry padding; padding lives in contentContainerStyle.)
+const LIST_STYLE = { backgroundColor: SEP_COLORS.bg };
 
 export interface SepArticleProps {
   article: ParsedArticle;
@@ -27,6 +38,8 @@ export interface SepArticleProps {
   footer?: React.ReactNode;
   // hash→svg map loaded from the math DB table after the article text renders.
   mathSvgs?: Record<string, string>;
+  // Overrides SEP_LIST_ENGINE for this instance (A/B comparison, tests).
+  listEngine?: ListEngine;
 }
 
 export interface SepArticleHandle {
@@ -36,9 +49,12 @@ export interface SepArticleHandle {
 export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(function SepArticle({
   article, onLinkPress, onFootnotePress, onProgress, onActiveSection, renderFallback,
   resolveImageSrc, annotations, onAnnotationPress, onAnnotationCreate, header, footer, mathSvgs,
+  listEngine,
 }, ref) {
+  const engine: ListEngine = listEngine ?? SEP_LIST_ENGINE;
   const { bottom: bottomInset } = useSafeAreaInsets();
   const flatListRef = useRef<FlatList<Block>>(null);
+  const flashListRef = useRef<FlashListRef<Block>>(null);
   const headingOffsets = useRef<Map<string, number>>(new Map());
   const lastProgress = useRef(0);
   const lastSection = useRef('');
@@ -50,14 +66,15 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
     return i > 0 ? article.blocks.slice(i) : article.blocks;
   }, [article.blocks]);
 
+  // Headings in document order (block index + id): feeds the scroll-spy and the
+  // id → block index map used for index-based jumps.
+  const headings = useMemo(() => collectHeadings(blocks), [blocks]);
+
   // Map heading id → block index for off-screen scrollToIndex fallback.
-  const headingIndexMap = useMemo(() => {
-    const map = new Map<string, number>();
-    blocks.forEach((b, i) => {
-      if (b.t === 'heading' && b.id) map.set(b.id, i);
-    });
-    return map;
-  }, [blocks]);
+  const headingIndexMap = useMemo(
+    () => new Map(headings.map(h => [h.id, h.index] as const)),
+    [headings],
+  );
 
   const onHeadingLayout = useCallback((id: string, y: number) => {
     headingOffsets.current.set(id, y);
@@ -72,21 +89,34 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
       onProgress(progress);
     }
     if (onActiveSection) {
-      const spy = contentOffset.y + 80;
       let active = '';
-      let bestY = -1;
-      headingOffsets.current.forEach((y, id) => {
-        if (y <= spy && y > bestY) { bestY = y; active = id; }
-      });
+      if (engine === 'flashlist') {
+        // Index-based spy: heading `onLayout` y is relative to its cell, not the
+        // list content, so it can't be compared with the scroll offset here.
+        const first = flashListRef.current?.getFirstVisibleIndex();
+        active = first === undefined ? '' : activeHeadingId(headings, first);
+      } else {
+        const spy = contentOffset.y + 80;
+        let bestY = -1;
+        headingOffsets.current.forEach((y, id) => {
+          if (y <= spy && y > bestY) { bestY = y; active = id; }
+        });
+      }
       if (active && active !== lastSection.current) {
         lastSection.current = active;
         onActiveSection(active);
       }
     }
-  }, [onProgress, onActiveSection]);
+  }, [onProgress, onActiveSection, engine, headings]);
 
   useImperativeHandle(ref, () => ({
     scrollToSection(id: string) {
+      if (engine === 'flashlist') {
+        // FlashList measures as it goes; scrollToIndex resolves once the target is placed.
+        const index = headingIndexMap.get(id);
+        if (index !== undefined) flashListRef.current?.scrollToIndex({ index, animated: true });
+        return;
+      }
       const y = headingOffsets.current.get(id);
       if (y !== undefined) {
         flatListRef.current?.scrollToOffset({ offset: y, animated: true });
@@ -98,12 +128,13 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
         flatListRef.current?.scrollToIndex({ index, animated: true });
       }
     },
-  }), [headingIndexMap]);
+  }), [headingIndexMap, engine]);
 
   const handlers: BlockHandlers = useMemo(() => ({
     onLinkPress,
     onFootnotePress,
-    onHeadingLayout,
+    // FlashList path jumps by index, so skip the per-heading onLayout bookkeeping.
+    onHeadingLayout: engine === 'flashlist' ? undefined : onHeadingLayout,
     renderFallback,
     resolveImageSrc,
     annotations,
@@ -111,7 +142,7 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
     onAnnotationCreate,
     mathSvgs,
   }), [onLinkPress, onFootnotePress, onHeadingLayout, renderFallback, resolveImageSrc,
-      annotations, onAnnotationPress, onAnnotationCreate, mathSvgs]);
+      annotations, onAnnotationPress, onAnnotationCreate, mathSvgs, engine]);
 
   const renderBlock = useCallback(({ item, index }: { item: Block; index: number }) => (
     <BlockView block={item} h={handlers} suppressTopBorder={index === 0} />
@@ -119,8 +150,37 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
 
   const keyExtractor = useCallback((_: Block, index: number) => String(index), []);
 
+  const contentStyle = useMemo(
+    () => ({ paddingHorizontal: SEP_SIDE_PAD, paddingTop: 16, paddingBottom: 96 + bottomInset }),
+    [bottomInset],
+  );
+
   const listHeader = header ? <View>{header}</View> : null;
   const listFooter = footer ? <View>{footer}</View> : null;
+
+  if (engine === 'flashlist') {
+    return (
+      <FlashList<Block>
+        ref={flashListRef}
+        data={blocks}
+        // Math SVGs and annotations reach cells via `handlers`, not `data`. FlashList
+        // documents itself as a pure list that re-renders on data/extraData changes,
+        // so pass it defensively. NOTE: in jest (mocked measurement) the math fill-in
+        // test passes even without this, so it is unproven on device; verify there
+        // before relying on or removing it.
+        extraData={handlers}
+        renderItem={renderBlock}
+        keyExtractor={keyExtractor}
+        getItemType={sepItemType}
+        style={LIST_STYLE}
+        contentContainerStyle={contentStyle}
+        onScroll={handleScroll}
+        scrollEventThrottle={32}
+        ListHeaderComponent={listHeader}
+        ListFooterComponent={listFooter}
+      />
+    );
+  }
 
   return (
     <FlatList<Block>
@@ -128,8 +188,8 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
       data={blocks}
       renderItem={renderBlock}
       keyExtractor={keyExtractor}
-      style={{ backgroundColor: SEP_COLORS.bg }}
-      contentContainerStyle={{ paddingHorizontal: SEP_SIDE_PAD, paddingTop: 16, paddingBottom: 96 + bottomInset }}
+      style={LIST_STYLE}
+      contentContainerStyle={contentStyle}
       onScroll={handleScroll}
       scrollEventThrottle={32}
       ListHeaderComponent={listHeader}

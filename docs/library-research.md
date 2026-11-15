@@ -156,6 +156,38 @@ math, this will not fix it, though it may still fix scroll feel and anchor jumps
 **Spike plan:** swap `FlatList` for `FlashList` behind a flag; test long articles
 (heavy math, long bibliography, tables), TOC jump, footnote jump, restore-scroll-position.
 
+### Spike status (2026-11-14): implemented behind a flag, not yet verified on a device
+
+- **What exists:** `SepArticle` has a `listEngine` prop (`'flatlist'` | `'flashlist'`),
+  defaulting to the `SEP_LIST_ENGINE` constant, which is `'flatlist'`, so nothing
+  changes for users. `@shopify/flash-list` is pinned at Expo's `2.0.2` (JS-only, no
+  native/pod change). The FlatList path is untouched.
+- **FlashList path:** `getItemType` per block type for recycle pools; `image` and
+  `unsupported` blocks get a unique type per index (they hold local state: image
+  aspect in `Blocks.tsx`, measured WebView height in `FallbackBlock`) so they are
+  never recycled; TOC jumps use `scrollToIndex` only (no `onScrollToIndexFailed`
+  retry hack); scroll-spy uses `getFirstVisibleIndex()` plus `activeHeadingId()`.
+- **Why the spy changed:** `onHeadingLayout` stores `layout.y`, which is relative to
+  the heading's parent cell, not the list content, so the existing offset-based spy
+  (and the `scrollToOffset(y)` branch of `scrollToSection`) compares apples to
+  oranges. Not fixed on the FlatList path (out of scope), but worth a device check:
+  it may explain odd TOC-highlight or jump behavior today.
+- **Verified (jest, mocked measurement):** both engines mount and render blocks,
+  header and footer; a math SVG arriving after first paint appears in an
+  already-visible cell; 13 new tests (helpers + smoke); `tsc` and `eslint` clean on
+  touched files; the full-suite failure set is identical to baseline (11 pre-existing
+  failures, all in `__tests__/mockup/*`).
+- **Not verified, needs a device (Xcode/Android SDK were unavailable in this
+  environment):** scroll smoothness and speed vs FlatList; `scrollToIndex` accuracy
+  with a header taller than the viewport and with variable-height blocks; scroll
+  progress accuracy (`contentSize` grows as blocks are measured); position stability
+  when math SVGs fill in above the viewport (`maintainVisibleContentPosition` is on by
+  default); recycled-cell glitches in tables, nested lists and footnote taps; macOS.
+  Also note `extraData={handlers}` is passed defensively: removing it did **not** fail
+  the math fill-in jest test, so it is unproven in either direction.
+- **To try it:** set `SEP_LIST_ENGINE = 'flashlist'` in `SepArticle.tsx` (or pass
+  `listEngine="flashlist"` from `ArticleScreen`) and rebuild.
+
 ## 6. Graph visualization
 
 **What it would replace:** `src/utils/forceLayout.ts` (97 lines, seeded
@@ -221,6 +253,14 @@ math must be generated on-device from fetched TeX, never as a bundled or CI-buil
    `mathjax-full.b64` asset we redistribute.
 3. `@react-native/new-app-screen` is listed in `package.json` but is not imported
    anywhere in `src/` or `App.tsx` (template leftover); safe to remove after a build check.
+4. **`react-native-worklets` is not declared in `package.json`.** `babel.config.js` uses
+   `react-native-reanimated/plugin`, which requires `react-native-worklets/plugin`.
+   `package-lock.json` has it only as an optional peer (resolved to 0.8.3), so
+   `npm ci --legacy-peer-deps` (what CI runs) does not install it and **every jest
+   suite fails at Babel** (`Cannot find module 'react-native-worklets/plugin'`) on a
+   clean checkout. Expo SDK 54 pins `react-native-worklets` at `0.5.1`; fix with
+   `npx expo install react-native-worklets`. (Found while setting up the spike; it
+   is not part of the FlashList change.)
 
 ## Sources
 
