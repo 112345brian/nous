@@ -45,7 +45,10 @@ export async function downloadAll(
     if (signal?.aborted) return;
     const chunk = uncached.slice(i, i + DOWNLOAD_CONCURRENCY);
     await Promise.all(chunk.map(({ slug, title }) =>
-      deps.cacheArticle(slug, { skipMath: true }).then(() => {
+      deps.cacheArticle(slug, { skipMath: true }).then(ok => {
+        // Only an article that was really cached counts as done, so the bar never claims
+        // progress for a failed download (and a retry still sees it as uncached).
+        if (!ok) return;
         // Increment inside .then() so each article fires its own progress event
         // rather than batching. done++ after await in concurrent callbacks can
         // read the same value twice; .then() serializes via microtask queue safely
@@ -76,15 +79,19 @@ export async function syncCachedArticles(
   const slugs = await deps.library.getCachedSlugs();
   const total = slugs.length;
   let done = 0;
+  let failed = 0;
   for (let i = 0; i < slugs.length; i += SYNC_CONCURRENCY) {
     if (signal?.aborted) return;
     const chunk = slugs.slice(i, i + SYNC_CONCURRENCY);
     await Promise.all(chunk.map(async ({ slug, title }) => {
-      await deps.cacheArticle(slug, { awaitMath: true });
+      if (!(await deps.cacheArticle(slug, { awaitMath: true }))) { failed++; return; }
       done++;
       onProgress({ done, total, current: title });
     }));
     await deps.sleep(SYNC_PAUSE_MS);
   }
+  // A run in which every article failed (offline, site down) refreshed nothing, so it must not
+  // postpone the next automatic sync by recording that the library is current.
+  if (total > 0 && failed === total) return;
   await deps.meta.setMeta('last_deep_sync', String(deps.clock.now()));
 }

@@ -163,11 +163,12 @@ describe('when the site cannot be read', () => {
     expect(m.upsertIndexEntries.mock.calls[0][0]).toEqual(seed);
     expect((seed as unknown[]).length).toBeGreaterThan(1000);
   });
-  test('quirk: the bundled fallback is stamped as a successful refresh, so it counts as fresh for a week', async () => {
+  test('the bundled fallback is NOT stamped as a refresh, so the next launch fetches the real index', async () => {
     setup({ lastRefresh: null, count: 0 });
     fetchMock.mockRejectedValue(new Error('offline'));
     await refreshIndexIfStale();
-    expect(m.setMeta).toHaveBeenCalledWith('index_refreshed_at', String(NOW));
+    expect(m.upsertIndexEntries).toHaveBeenCalledTimes(1);
+    expect(m.setMeta).not.toHaveBeenCalledWith('index_refreshed_at', expect.anything());
   });
   test('a page that parses to zero entries writes nothing (and does not fall back to the seed)', async () => {
     setup({ lastRefresh: null, count: 0 });

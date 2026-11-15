@@ -28,18 +28,21 @@ export async function refreshIndexIfStale(deps: RefreshIndexDeps): Promise<void>
   if (!isStale) return;
 
   let entries: IndexEntry[];
+  let fromSource = true;
   try {
     entries = parseContentsHtml(await source.fetchIndexHtml());
   } catch {
     // fall back to bundled seed on first launch; if index already exists, skip silently
-    if (count === 0) entries = deps.bundledEntries;
+    if (count === 0) { entries = deps.bundledEntries; fromSource = false; }
     else return;
   }
 
   if (entries.length > 0) {
     await store.upsertIndexEntries(entries);
     await store.cleanDenormalizedTitles();
-    await meta.setMeta('index_refreshed_at', String(clock.now()));
+    // The bundled seed only fills in until the real index can be fetched: do not stamp it as a
+    // successful refresh, or an offline first launch would skip the real fetch for a week.
+    if (fromSource) await meta.setMeta('index_refreshed_at', String(clock.now()));
     // Rebuild link index in background after new index data lands
     rebuildLinkIndex(deps).catch(() => {});
   }

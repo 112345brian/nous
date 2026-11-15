@@ -159,14 +159,23 @@ describe('downloadAll', () => {
     expect(JSON.parse(mockMeta.math_pending ?? '[]')).toEqual([]);
   });
 
-  test('quirk: an article that fails to download still counts as done', async () => {
+  test('an article that fails to download does not count as done', async () => {
     m.getSlugsByCacheStatus.mockResolvedValue({ uncached: entries(2), cached: [] });
     instantFetch({ a0: { ok: false, status: 503, text: async () => '' } });
     const p = progress();
     const run = downloadAll(p.fn);
     await jest.runAllTimersAsync(); await run;
-    expect(p.calls.map(c => c.done)).toEqual([0, 1, 2]);
+    expect(p.calls.map(c => c.done)).toEqual([0, 1]);
     expect(m.cacheArticle).toHaveBeenCalledTimes(1);
+  });
+
+  test('when every download fails, progress never leaves zero', async () => {
+    m.getSlugsByCacheStatus.mockResolvedValue({ uncached: entries(3), cached: [] });
+    fetchMock.mockRejectedValue(new Error('offline'));
+    const p = progress();
+    const run = downloadAll(p.fn);
+    await jest.runAllTimersAsync(); await run;
+    expect(p.calls.map(c => c.done)).toEqual([0]);
   });
 
   test('already aborted: only the opening event, nothing fetched', async () => {
@@ -281,14 +290,31 @@ describe('syncCachedArticles', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  test('quirk: an article that fails to download still counts as done', async () => {
+  test('an article that fails to download does not count as done, but the rest still sync', async () => {
     m.getCachedSlugs.mockResolvedValue(entries(2));
     instantFetch({ a0: { ok: false, status: 500, text: async () => '' } });
     const p = progress();
     const run = syncCachedArticles(p.fn);
     await jest.runAllTimersAsync(); await run;
-    expect(p.calls.map(c => c.done)).toEqual([1, 2]);
-    expect(mockMeta.last_deep_sync).toBe(String(NOW + 200));
+    expect(p.calls.map(c => c.done)).toEqual([1]);
+    expect(mockMeta.last_deep_sync).toBe(String(NOW + 200));   // one article was refreshed
+  });
+
+  test('a sync in which every article fails (offline) does not record last_deep_sync', async () => {
+    m.getCachedSlugs.mockResolvedValue(entries(4));
+    fetchMock.mockRejectedValue(new Error('offline'));
+    const p = progress();
+    const run = syncCachedArticles(p.fn);
+    await jest.runAllTimersAsync(); await run;
+    expect(p.calls).toEqual([]);
+    expect(mockMeta.last_deep_sync).toBeUndefined();
+  });
+
+  test('an empty library has nothing to fail, so the sync time is still recorded', async () => {
+    m.getCachedSlugs.mockResolvedValue([]);
+    const run = syncCachedArticles(() => {});
+    await jest.runAllTimersAsync(); await run;
+    expect(mockMeta.last_deep_sync).toBeDefined();
   });
 
   test('a storage failure reading the library rejects and records nothing', async () => {

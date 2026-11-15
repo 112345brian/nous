@@ -87,6 +87,23 @@ describe('the request', () => {
     expect(m.cacheArticle).not.toHaveBeenCalled();
   });
 
+  test('a body that stalls after the headers is aborted at 30 seconds too', async () => {
+    jest.useFakeTimers();
+    fetchMock.mockImplementation(async (_u: string, init: { signal: AbortSignal }) => ({
+      ok: true, status: 200,
+      text: () => new Promise((_res, rej) => init.signal.addEventListener('abort', () => rej(new Error('aborted')))),
+    }));
+    const p = fetchAndCacheArticle('free-will');
+    await jest.advanceTimersByTimeAsync(29_999);
+    let settled = false; p.then(() => { settled = true; });
+    await jest.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+    await jest.advanceTimersByTimeAsync(1);
+    await expect(p).resolves.toBe(false);
+    expect(m.cacheArticle).not.toHaveBeenCalled();
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
   test('the timeout timer is cleared once the response arrives', async () => {
     jest.useFakeTimers();
     await fetchAndCacheArticle('free-will');

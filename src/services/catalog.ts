@@ -15,14 +15,15 @@ const SEP_HEADERS = {
 export async function fetchArticleHtml(slug: string): Promise<string | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30_000);
-  let res: Response;
+  // The timer covers the body as well as the headers: a connection that stalls mid-body is aborted
+  // too, instead of hanging the caller.
   try {
-    res = await perf.time(slug, 'fetch', () => fetch(`${BASE}/entries/${slug}/`, { headers: SEP_HEADERS, signal: controller.signal }));
+    const res = await perf.time(slug, 'fetch', () => fetch(`${BASE}/entries/${slug}/`, { headers: SEP_HEADERS, signal: controller.signal }));
+    if (!res.ok) return null;
+    return await perf.time(slug, 'fetch-body', () => res.text());
   } finally {
     clearTimeout(timer);
   }
-  if (!res.ok) return null;
-  return perf.time(slug, 'fetch-body', () => res.text());
 }
 
 export async function fetchIndexHtml(): Promise<string> {
@@ -39,14 +40,14 @@ export async function fetchNotesHtml(slug: string): Promise<string | null> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 30_000);
-    let res: Response;
+    let html: string;
     try {
-      res = await fetch(`${BASE}/entries/${slug}/notes.html`, { headers: SEP_HEADERS, signal: controller.signal });
+      const res = await fetch(`${BASE}/entries/${slug}/notes.html`, { headers: SEP_HEADERS, signal: controller.signal });
+      if (!res.ok) return null;
+      html = await res.text();   // still under the timer: a stalled body is aborted
     } finally {
       clearTimeout(timer);
     }
-    if (!res.ok) return null;
-    const html = await res.text();
     return extractById(html, 'aueditable') || extractById(html, 'article-content') || null;
   } catch {
     return null;
