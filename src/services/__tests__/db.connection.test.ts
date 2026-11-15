@@ -29,40 +29,6 @@ const userVersion = (r: any): number => Number(r.prepare('PRAGMA user_version').
 const meta = (r: any, key: string): string | undefined =>
   r.prepare('SELECT value FROM meta WHERE key = ?').get(key)?.value;
 
-// The oldest on-disk shape: before pub_date, content_hash, content_ast, notes,
-// read_progress, excerpt, parent_label, source and has_math existed, with the
-// original content-table FTS index and none of the one-shot migration flags.
-function seedLegacyDatabase(opts: { flags?: boolean } = {}): void {
-  const r = fake.raw();
-  r.exec(`
-    CREATE TABLE entries (
-      slug TEXT PRIMARY KEY, title TEXT NOT NULL,
-      preamble_html TEXT, toc_html TEXT, content_html TEXT,
-      word_count INTEGER DEFAULT 0, cached_at INTEGER
-    );
-    CREATE TABLE reads (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL, title TEXT NOT NULL,
-      visited_at INTEGER NOT NULL, from_slug TEXT, session_id TEXT NOT NULL
-    );
-    CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
-    CREATE TABLE bookmarks (slug TEXT PRIMARY KEY, title TEXT NOT NULL, saved_at INTEGER NOT NULL);
-    CREATE TABLE annotations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL, selected_text TEXT NOT NULL,
-      context TEXT, note TEXT, color TEXT NOT NULL DEFAULT '#FFE566',
-      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
-    );
-    CREATE VIRTUAL TABLE entries_fts USING fts5(title, content='entries', tokenize='porter ascii');
-    INSERT INTO entries (slug, title, preamble_html, toc_html, content_html, cached_at)
-      VALUES ('plato', 'Plato', '<p>pre</p>', '<ul/>', '<p>body</p>', 1700000000000),
-             ('kant', 'Immanuel Kant', NULL, NULL, NULL, NULL);
-    INSERT INTO bookmarks (slug, title, saved_at) VALUES ('plato', 'Plato', 5);
-    INSERT INTO annotations (slug, selected_text, created_at, updated_at) VALUES ('plato', 'body', 1, 1);
-  `);
-  if (opts.flags) {
-    r.exec(`INSERT INTO meta (key, value) VALUES ('migrated_clear_cache_v2', '1'), ('ast_parser_version', '2')`);
-  }
-}
-
 describe('fresh install', () => {
   it('creates every table and column the app reads', async () => {
     await db.getDb();
@@ -79,13 +45,12 @@ describe('fresh install', () => {
     expect(columns(r, 'annotations')).toContain('content_hash');
   });
 
-  it('uses WAL, a standalone porter FTS index, and records the one-shot flags', async () => {
+  it('uses WAL, a standalone porter FTS index, and records the parser version', async () => {
     await db.getDb();
     const r = fake.raw();
     const fts = r.prepare("SELECT sql FROM sqlite_master WHERE name = 'entries_fts'").get().sql as string;
     expect(fts).toMatch(/fts5/i);
     expect(fts).not.toContain("content='entries'");
-    expect(meta(r, 'migrated_clear_cache_v2')).toBe('1');
     expect(meta(r, 'ast_parser_version')).toBe('2');
   });
 
@@ -97,73 +62,21 @@ describe('fresh install', () => {
   });
 });
 
-describe('upgrading an existing install (user_version = 0)', () => {
-  it('adds the missing columns and keeps the user data', async () => {
-    seedLegacyDatabase({ flags: true });
-    await db.getDb();
-    const r = fake.raw();
-    expect(columns(r, 'entries')).toEqual(expect.arrayContaining(['pub_date', 'content_hash', 'content_ast', 'notes_html', 'has_math', 'source']));
-    expect(r.prepare('SELECT source FROM entries WHERE slug = ?').get('plato').source).toBe('sep');
-    expect(r.prepare('SELECT COUNT(*) AS n FROM bookmarks').get().n).toBe(1);
-    expect(r.prepare('SELECT COUNT(*) AS n FROM annotations').get().n).toBe(1);
-  });
-
-  it('keeps cached articles when the one-shot migrations already ran', async () => {
-    seedLegacyDatabase({ flags: true });
-    await db.getDb();
-    const row = fake.raw().prepare('SELECT content_html, cached_at FROM entries WHERE slug = ?').get('plato');
-    expect(row.content_html).toBe('<p>body</p>');
-    expect(row.cached_at).toBe(1700000000000);
-  });
-
-  it('clears articles cached before preamble_html existed, once', async () => {
-    seedLegacyDatabase();
-    await db.getDb();
-    const row = fake.raw().prepare('SELECT content_html, preamble_html, toc_html, cached_at FROM entries WHERE slug = ?').get('plato');
-    expect(row).toEqual({ content_html: null, preamble_html: null, toc_html: null, cached_at: null });
-    expect(meta(fake.raw(), 'migrated_clear_cache_v2')).toBe('1');
-  });
-
-  it('nulls cached ASTs when the parser version differs', async () => {
-    seedLegacyDatabase({ flags: true });
-    fake.raw().exec(`UPDATE meta SET value = '1' WHERE key = 'ast_parser_version'`);
-    // content_ast does not exist yet in the legacy shape; add it the way an older release did.
-    fake.raw().exec(`ALTER TABLE entries ADD COLUMN content_ast TEXT; UPDATE entries SET content_ast = '{"v":1}' WHERE slug = 'plato'`);
-    await db.getDb();
-    expect(fake.raw().prepare('SELECT content_ast FROM entries WHERE slug = ?').get('plato').content_ast).toBeNull();
-    expect(meta(fake.raw(), 'ast_parser_version')).toBe('2');
-  });
-
-  it('rebuilds the old content-table FTS index as a populated standalone one', async () => {
-    seedLegacyDatabase({ flags: true });
-    await db.getDb();
-    const r = fake.raw();
-    const fts = r.prepare("SELECT sql FROM sqlite_master WHERE name = 'entries_fts'").get().sql as string;
-    expect(fts).not.toContain("content='entries'");
-    const hits = r.prepare("SELECT slug FROM entries_fts WHERE entries_fts MATCH 'kant'").all();
-    expect(hits.map((h: any) => h.slug)).toEqual(['kant']);
-  });
-
-  it('stamps user_version so the next launch skips every step', async () => {
-    const { LATEST_CORE_SCHEMA_VERSION } = require('../coreMigrations');
-    seedLegacyDatabase({ flags: true });
-    await db.getDb();
-    expect(userVersion(fake.raw())).toBe(LATEST_CORE_SCHEMA_VERSION);
-  });
-
-  it('adds the hot-path indexes to an install that was already at schema version 4', async () => {
+describe('later schema steps', () => {
+  it('applies a step appended after version 1 to a database already at version 1', async () => {
+    const { runMigrations, userVersionStore } = require('../migrations');
+    const { CORE_MIGRATIONS } = require('../coreMigrations');
     await db.getDb();
     await db.closeDb();
-    const r = fake.raw();
-    for (const idx of ['idx_reads_visited', 'idx_reads_session_visited', 'idx_reads_slug', 'idx_annotations_slug']) {
-      r.exec(`DROP INDEX IF EXISTS ${idx}`);
-    }
-    r.exec('PRAGMA user_version = 4');
-
-    await db.getDb();
-    const names = r.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%'").all().map((x: any) => x.name);
-    expect(names).toEqual(expect.arrayContaining(['idx_reads_visited', 'idx_reads_session_visited', 'idx_reads_slug', 'idx_annotations_slug']));
-    expect(userVersion(r)).toBe(5);
+    const v2 = {
+      version: CORE_MIGRATIONS.length + 1,
+      name: 'test step',
+      async up(d: any) { await d.execAsync('ALTER TABLE entries ADD COLUMN extra TEXT'); },
+    };
+    const handle = await fake.module.openDatabaseAsync('sep.db');
+    await expect(runMigrations(handle, [...CORE_MIGRATIONS, v2], userVersionStore)).resolves.toBe(v2.version);
+    expect(columns(fake.raw(), 'entries')).toContain('extra');
+    expect(userVersion(fake.raw())).toBe(v2.version);
   });
 
   it('leaves a database from a newer app version alone', async () => {
@@ -176,7 +89,7 @@ describe('upgrading an existing install (user_version = 0)', () => {
 });
 
 describe('reopening', () => {
-  it('does not re-run one-shot migrations or lose data', async () => {
+  it('does not lose data', async () => {
     await db.getDb();
     const r = fake.raw();
     r.exec(`INSERT INTO entries (slug, title, content_html, content_ast, cached_at) VALUES ('x', 'X', '<p>kept</p>', '{}', 1)`);
@@ -197,8 +110,8 @@ describe('reopening', () => {
 });
 
 describe('migration failures', () => {
-  it('(bug) propagates a real ALTER failure instead of swallowing it, and retries cleanly', async () => {
-    fake.state.failSql = (sql: string) => (/ADD COLUMN pub_date/.test(sql) ? new Error('database or disk is full') : null);
+  it('propagates a failing step instead of swallowing it, and retries cleanly', async () => {
+    fake.state.failSql = (sql: string) => (/CREATE INDEX idx_reads_slug/.test(sql) ? new Error('database or disk is full') : null);
     await expect(db.getDb()).rejects.toThrow('disk is full');
     expect(userVersion(fake.raw())).toBe(0);
     // The whole step rolled back, including the tables it had already created.
@@ -207,13 +120,13 @@ describe('migration failures', () => {
 
     fake.state.failSql = null;
     await db.getDb();
-    expect(columns(fake.raw(), 'entries')).toContain('pub_date');
+    expect(userVersion(fake.raw())).toBe(1);
   });
 
   it('(bug) a failed initialisation is not cached as an open, half-built database', async () => {
     let n = 0;
     fake.state.failSql = (sql: string) =>
-      (sql.includes('CREATE TABLE IF NOT EXISTS entries') && n++ === 0 ? new Error('boom') : null);
+      (sql.includes('CREATE TABLE entries') && n++ === 0 ? new Error('boom') : null);
     await expect(db.getDb()).rejects.toThrow('boom');
     const handle = await db.getDb();
     expect(handle).toBeDefined();

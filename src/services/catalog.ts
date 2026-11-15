@@ -4,6 +4,7 @@ import seedEntries from '../assets/entry-seed.json';
 import { renderMathBatch } from './mathRender';
 import { parseSepHtml } from '../utils/sepHtml/parse';
 import { perf } from '../utils/perf';
+import { classifySimpleTex, TIERED_MATH_DEFAULT } from '../utils/mathTier';
 
 // 64-bit hash of a TeX equation (or SVG bytes) + display flag. Two independent
 // djb2-xor passes with different seeds; birthday collision at ~2^32 unique inputs
@@ -24,6 +25,19 @@ function mathHash(input: string, display: boolean): string {
 // placeholder elements. SVGs are stored in the `math` DB table by hash so
 // content_html stays small — no inlined base64, no multi-MB HTML.
 const MATH_SUBST_RE = /\\\(([\s\S]*?)\\\)|\\\[([\s\S]*?)\\\]/g;
+// Tiered math flag. Default OFF until verified on a device. Enable by setting the
+// `tiered_math` meta pref to '1' (setMeta('tiered_math', '1')) or flipping the
+// constant (mathTier.ts). Applies to every article; db init clears cached
+// content when the on/off state or MATH_TIER_VERSION changes, so articles
+// re-fetch and re-process on next launch (docs/tiered-math.md).
+async function tieredMathEnabled(): Promise<boolean> {
+  try {
+    const v = await getMeta('tiered_math');
+    if (v === '1') return true;
+    if (v === '0') return false;
+  } catch { /* fall through to default */ }
+  return TIERED_MATH_DEFAULT;
+}
 async function substitutemath(html: string): Promise<string> {
   const spots: Array<{ index: number; len: number; tex: string; display: boolean }> = [];
   MATH_SUBST_RE.lastIndex = 0;
@@ -40,14 +54,30 @@ async function substitutemath(html: string): Promise<string> {
   }
   if (!spots.length) return html;
 
-  const results = await renderMathBatch(spots.map(s => ({ tex: s.tex, display: s.display })));
+  // Tiering (flag-gated): trivially simple TeX becomes styled text in the line;
+  // only the remainder is typeset by MathJax. Fail closed — null means MathJax.
+  const tiered = (await tieredMathEnabled())
+    ? spots.map(s => classifySimpleTex(s.tex, s.display))
+    : spots.map(() => null);
+  const mjIdx: number[] = [];
+  for (let i = 0; i < spots.length; i++) if (tiered[i] === null) mjIdx.push(i);
+  const mjResults = mjIdx.length
+    ? await renderMathBatch(mjIdx.map(i => ({ tex: spots[i].tex, display: spots[i].display })))
+    : [];
+  const results: Array<(typeof mjResults)[number] | undefined> = new Array(spots.length);
+  mjIdx.forEach((i, k) => { results[i] = mjResults[k]; });
 
   let out = html;
   const rows: Array<{ hash: string; svg: string; w: number; h: number; display: boolean }> = [];
   for (let i = spots.length - 1; i >= 0; i--) {
+    const { index, len, display, tex } = spots[i];
+    const text = tiered[i];
+    if (text !== null) {
+      out = out.slice(0, index) + text + out.slice(index + len);
+      continue;
+    }
     const r = results[i];
     if (!r || r.error || !r.b64) continue;
-    const { index, len, display, tex } = spots[i];
     const hash = mathHash(tex, display);
     const w = (r.w ?? 1).toFixed(4);
     const h = (r.h ?? 1).toFixed(4);
@@ -56,6 +86,10 @@ async function substitutemath(html: string): Promise<string> {
     const tag = `<math-i hash="${hash}" d="${display ? '1' : '0'}" w="${w}" h="${h}"></math-i>`;
     out = out.slice(0, index) + tag + out.slice(index + len);
   }
+  // The renderer produced nothing for the MathJax remainder (timeout): report
+  // "nothing converted" so the caller keeps the article pending, exactly as
+  // before tiering — never mark done with raw TeX left behind.
+  if (mjIdx.length && !rows.length) return html;
   // Store SVGs in the math table in one transaction (idempotent on hash). Done
   // before the caller writes the substituted HTML, so no placeholder can ever
   // reference a missing row.

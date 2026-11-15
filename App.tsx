@@ -12,7 +12,6 @@ import { ThemeProvider, useScheme, withTheme } from './src/theme/ThemeProvider';
 import { withWideFrame } from './src/components/WideFrame';
 import { isReduceMotion } from './src/utils/motion';
 import { APP_ACCENT } from './src/utils/sepHtml/render/theme';
-import { syncOnLaunch } from './src/services/dataSync';
 import { importSeedFromUrl } from './src/services/seedImport';
 import type { SeedPhase } from './src/services/seedImport';
 import { backfillAst, backfillMathHashFormat, backfillMathInline, downloadAll, refreshIndexIfStale, syncCachedArticles } from './src/services/catalog';
@@ -144,8 +143,6 @@ function AppInner() {
   }
 
   async function initialize(prefs: Prefs) {
-    syncOnLaunch();
-
     const count = await getEntryCount();
 
     if (count === 0) {

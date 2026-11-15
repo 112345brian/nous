@@ -45,6 +45,7 @@ export const PRESERVED_META_KEYS: ReadonlySet<string> = new Set([
   'sync_folder',
   'zotero_api_key',
   'zotero_user_id',
+  'tiered_math', // math rendering pref ('1'/'0')
 ]);
 export const PRESERVED_META_PREFIXES: readonly string[] = ['pref_'];
 export const CACHE_META_KEYS: ReadonlySet<string> = new Set([
@@ -53,8 +54,8 @@ export const CACHE_META_KEYS: ReadonlySet<string> = new Set([
   'last_deep_sync',
   'math_inline_v2',
   'math_hash_format_v1',
-  'migrated_clear_cache_v2',
   'ast_parser_version',
+  'math_tier_stamp', // which math pipeline produced the cached articles
 ]);
 
 const isPreservedMetaKey = (key: string): boolean =>
@@ -136,8 +137,8 @@ async function restoreUserData(snap: UserDataSnapshot): Promise<void> {
   // importUserData writes only the synced-pref allowlist (it is the sync-file
   // format and must never carry credentials). The settings this swap preserves
   // (onboarding_done, sync_folder, zotero_user_id, ...) are not all in it, so
-  // write them back directly. A legacy zotero_api_key meta row goes back as a
-  // meta row, which the next read moves into secure storage.
+  // write them back directly. A zotero_api_key meta row (the fallback used when
+  // secure storage is unavailable) goes back as a meta row.
   for (const [key, value] of Object.entries(snap.data.prefs ?? {})) {
     await setMeta(key, value);
   }

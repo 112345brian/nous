@@ -7,9 +7,8 @@ describe('DATA — backing behaviour', () => {
   // The schema lives in the versioned migration list, not in db.ts.
   const schema = () => SRC.coreSchema();
 
-  test('DATA-01 entries.read_progress column + migration', () => {
+  test('DATA-01 entries.read_progress column', () => {
     expect(schema()).toMatch(/read_progress\s+REAL/);
-    expect(schema()).toMatch(/\['entries',\s*'read_progress REAL/); // the ALTER for pre-versioning installs
   });
 
   test('DATA-01 setReadProgress ratchets upward (MAX) and clamps', () => {
