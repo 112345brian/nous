@@ -1,7 +1,7 @@
 import React from 'react';
 import { Text, View } from 'react-native';
 import { SvgXml } from 'react-native-svg';
-import type { Inline } from '../types';
+import type { Inline } from '../../../utils/sepHtml/types';
 import { SEP_COLORS, useSepTheme, type SepTheme } from './theme';
 
 export interface InlineHandlers {

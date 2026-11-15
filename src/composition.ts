@@ -46,6 +46,7 @@ import { createProgressNotifier } from './core/downloadNotifier';
 import { prewarmCommonMath, type PrewarmDeps } from './core/prewarmCommonMath';
 import { COMMON_MATH, commonMathStamp } from './data/commonMath';
 import { perf } from './services/perf';
+export { perf };
 // UI stores and use cases (section "UI stores" below).
 import * as dbStore from './services/db';
 import type {
@@ -57,7 +58,8 @@ import { loadHomeData as loadHomeDataUseCase } from './core/homeData';
 import { loadReaderSettings as loadReaderSettingsUseCase } from './core/readerSettings';
 import { runAutoDeepSync as runAutoDeepSyncUseCase } from './core/autoDeepSync';
 import { prepareZoteroSend as prepareZoteroSendUseCase } from './core/zoteroSend';
-import { linkifyHtml } from './utils/linkifier';
+import { createLinkifier } from './utils/linkifier';
+import { LINK_MAP_JSON } from './assets/linkMapData';
 import seedEntries from './assets/entry-seed.json';
 // Knowledge graph (graph/InPhO slice)
 import { getDb, getEntryPreview, getEntryHtml as getEntryHtmlForGraph } from './services/db';
@@ -66,6 +68,14 @@ import { createGraphStore } from './services/graphDb';
 import { inphoSource } from './services/inphoSource';
 
 declare const __DEV__: boolean | undefined;
+
+// The linkifier over the bundled link index. Parsing the index and compiling its regex is deferred
+// to the first article that is cached, not paid at startup.
+let linkifier: ((html: string) => string) | null = null;
+function linkifyHtml(html: string): string {
+  if (!linkifier) linkifier = createLinkifier(LINK_MAP_JSON);
+  return linkifier(html);
+}
 
 // ── Math runtime ─────────────────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import { APP_ACCENT } from '../utils/sepHtml/render/theme';
+import { APP_ACCENT } from '../ui/sepHtml/render/theme';
 import { colors, themedStyles } from '../theme/tokens';
 
 interface Props {

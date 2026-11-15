@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useImperativeHandle, useMemo, useRef } f
 import { FlatList, View, type ViewToken, type NativeSyntheticEvent, type NativeScrollEvent } from 'react-native';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { ParsedArticle, Block } from '../types';
+import type { ParsedArticle, Block } from '../../../utils/sepHtml/types';
 import type { Annotation } from '../../../types';
 import { BlockView, type BlockHandlers } from './Blocks';
 import { SEP_COLORS, SEP_SIDE_PAD, useSepTheme } from './theme';

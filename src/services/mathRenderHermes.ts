@@ -7,7 +7,7 @@
 // slices with a yield between them; the JS thread is never held longer than
 // about one slice plus one equation.
 
-import { texToSvg } from '../utils/sepHtml/render/texToSvg';
+import { texToSvg } from './texToSvg';
 import type { MathRequest as MathReq, MathResult } from '../core/ports';
 
 /** Build-time flag. Off by default; the WebView path is untouched when off. */

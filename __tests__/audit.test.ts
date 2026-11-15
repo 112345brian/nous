@@ -103,7 +103,7 @@ describe('platform conformance', () => {
     expect(app.expo.userInterfaceStyle).toBe('automatic');
   });
   it('the reader caps its line length', () => {
-    expect(read(path.join(root, 'src/utils/sepHtml/render/SepArticle.tsx'))).toMatch(/maxWidth: measure/);
+    expect(read(path.join(root, 'src/ui/sepHtml/render/SepArticle.tsx'))).toMatch(/maxWidth: measure/);
   });
 });
 

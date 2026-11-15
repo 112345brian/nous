@@ -5,13 +5,11 @@
 // Skips text inside <a>, <code>, <pre>, <script>, <style>, <h1-3>, <cite>,
 // <blockquote> to avoid double-linking or corrupting existing markup.
 
-import { LINK_MAP_JSON } from '../assets/linkMapData';
-
 type LinkEntry = { s: string; t: string; p: string };
 
-// The link index is a parameter: createLinkifier() takes the index JSON and keeps its
-// compiled state in a closure, so it can be tested with a tiny fake index. linkifyHtml()
-// is the app's default, a lazily built instance over the bundled index.
+// The link index is a parameter: createLinkifier() takes the index JSON and keeps its compiled
+// state in a closure, so it can be tested with a tiny fake index. The app's one instance over the
+// bundled index is built (lazily) in src/composition.ts.
 
 const SKIP_OPEN  = /^<(a|code|pre|script|style|h[123]|cite|blockquote)\b/i;
 const SKIP_CLOSE = /^<\/(a|code|pre|script|style|h[123]|cite|blockquote)>/i;
@@ -56,16 +54,4 @@ export function createLinkifier(linkMapJson: string): (html: string) => string {
       return result;
     }).join('');
   };
-}
-
-// Default instance over the bundled index, built on first use (parsing the index and
-// compiling its regex is deferred until the first article is cached).
-// KNOWN EXCEPTION in src/utils/__tests__/innerRing.test.ts: this is the one remaining hidden
-// cache in the inner ring. Move it next to the other wiring in src/services once catalog.ts
-// is no longer being edited, then delete the exception.
-let _default: ((html: string) => string) | null = null;
-
-export function linkifyHtml(html: string): string {
-  if (!_default) _default = createLinkifier(LINK_MAP_JSON);
-  return _default(html);
 }

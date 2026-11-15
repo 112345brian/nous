@@ -2,7 +2,7 @@
 // 6 ms budget between yields (the yield itself is simulated; CLI has no timers).
 globalThis.PACKAGE_VERSION = '3.2.1';
 const eqs = require('./gen500')(500);
-const { texToSvg } = require('../../src/utils/sepHtml/render/texToSvg');
+const { texToSvg } = require('../../src/services/texToSvg');
 texToSvg('x', false);
 const BUDGET = 6; let slices = [], start = Date.now(), t0 = start;
 for (let i = 0; i < eqs.length; i++) {

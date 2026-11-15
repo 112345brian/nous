@@ -1,4 +1,4 @@
-import type { Block } from '../../types';
+import type { Block } from '../../../../utils/sepHtml/types';
 import { activeHeadingId, collectHeadings, sepItemType } from '../listHelpers';
 
 const para: Block = { t: 'para', children: [] };

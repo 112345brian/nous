@@ -3,7 +3,7 @@
  * TeX → SVG renderer (MathJax in Node). DEV / AUDIT TOOL ONLY.
  *
  * In production this rendering happens ON-DEVICE — see
- * src/utils/sepHtml/render/texToSvg.ts, which is the same DOM-free liteAdaptor
+ * src/services/texToSvg.ts, which is the same DOM-free liteAdaptor
  * path running in the RN runtime. The client renders each equation from fetched
  * TeX and caches the SVG locally; the SVG is a runtime artifact and is NEVER
  * bundled or folded into a shipped DB (SEP-derived output may not be

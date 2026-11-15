@@ -6,7 +6,7 @@
 //   RC2  adapters (src/services) never import the composition root
 //   RC3  only composition.ts wires core use cases (no exceptions today)
 //   RC4  screens, components and App.tsx get the converted use cases from the root
-//   RC5  ratchet: the files that still import the SQLite adapter directly can only shrink
+//   RC5  the UI (screens, components, boot, theme, src/ui, App.tsx) imports nothing from src/services
 import ts from 'typescript';
 
 declare function require(mod: string): any;
@@ -81,13 +81,6 @@ const WIRING_EXCEPTIONS: Array<{ file: string; reason: string }> = [
     reason: 're-export of src/core/migrations for services/graphDb.ts (owned by another change); delete when graphDb imports the core path' },
 ];
 
-// RC5: files outside the root that import the SQLite adapter (services/db) as a value. Shrink-only.
-// The screens, components, useBoot and ThemeProvider now take the stores (readerState, bookmarkStore,
-// annotationStore, libraryRead, appPrefs, metaStore) and the UI use cases from the root. Only the
-// graph screen is left; the graph session owns it. When it moves, this list is empty and stays so.
-const DB_DIRECT_ALLOWLIST: string[] = [
-];
-
 // What the root exports for the UI (stores and the use cases built over them).
 const UI_ROOT_EXPORTS = [
   'metaStore', 'readerState', 'bookmarkStore', 'annotationStore', 'libraryRead', 'appPrefs',
@@ -142,30 +135,26 @@ describe('RC4: UI gets the converted use cases from the root', () => {
   });
 });
 
-describe('RC5: direct use of the SQLite adapter can only shrink', () => {
-  const importsDb = (f: string) => importsFor(f).some(i => i.from === 'src/services/db' && !i.typeOnly);
+describe('RC5: the UI never reaches an adapter', () => {
+  // The UI is everything that draws or boots: screens, components, boot, theme, src/ui and App.tsx.
+  // It takes stores and use cases from the root and shapes from src/types; it imports nothing from
+  // src/services (not the SQLite adapter, not the fetchers, not a dev tool), as a value or a type.
+  const UI_ALL = [...UI, ...SRC.filter(f => f.startsWith('src/theme/') || f.startsWith('src/ui/'))];
 
-  test('no new file outside the allowlist imports services/db', () => {
-    const actual = [...SRC.filter(f => !f.startsWith('src/services/') && !f.startsWith('src/core/') && !f.startsWith('src/tests/')), 'App.tsx', 'src/composition.ts']
-      .filter(f => f !== 'src/composition.ts' && fs.existsSync(path.join(ROOT, f)) && importsDb(f));
-    const extra = actual.filter(f => !DB_DIRECT_ALLOWLIST.includes(f));
-    expect(extra).toEqual([]);
+  test('no UI file imports anything from src/services', () => {
+    expect(UI_ALL.length).toBeGreaterThan(25);
+    const bad: string[] = [];
+    for (const f of UI_ALL) for (const i of importsFor(f)) if (i.from.startsWith('src/services/')) bad.push(`${f} imports ${i.from}`);
+    expect(bad).toEqual([]);
   });
 
-  test('every allowlisted file still imports it, so migrated files must leave the list', () => {
-    const stale = DB_DIRECT_ALLOWLIST.filter(f => !importsDb(f));
-    expect(stale).toEqual([]);
-  });
-});
-
-describe('RC5: the screens that were migrated stay off the adapter', () => {
-  test('these UI files never import services/db, as a value or a type', () => {
-    const migrated = UI.filter(f => f !== 'src/screens/GraphScreen.tsx');
-    expect(migrated.length).toBeGreaterThan(8);
-    const bad = [...migrated, 'src/theme/ThemeProvider.tsx', ...SRC.filter(f => f.startsWith('src/ui/'))]
+  test('nothing outside src/services, src/core, tests and the root imports the SQLite adapter', () => {
+    const bad = SRC.filter(f => !f.startsWith('src/services/') && !f.startsWith('src/core/') && !f.startsWith('src/tests/') && f !== 'src/composition.ts')
+      .concat(['App.tsx'])
       .filter(f => importsFor(f).some(i => i.from === 'src/services/db'));
     expect(bad).toEqual([]);
   });
+
   test('ThemeProvider receives its store; it does not import the root or an adapter', () => {
     const froms = importsFor('src/theme/ThemeProvider.tsx').map(i => i.from);
     expect(froms.some(f => f.startsWith('src/services/') || f === 'src/composition')).toBe(false);

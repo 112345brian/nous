@@ -8,7 +8,7 @@
  * the on-device cache's eventual footprint.
  *
  * IMPORTANT: this output must NOT be folded into the content DB or app bundle.
- * Math is rendered ON-DEVICE at runtime (src/utils/sepHtml/render/mathStore.ts):
+ * Math is rendered ON-DEVICE at runtime ((removed; math is rendered by core/substituteMath.ts)):
  * the client builds each SVG from fetched TeX and stores it locally. SEP-derived
  * rendered output may not be redistributed — see NOTICE.md / AGENTS.md. This
  * script exists only to measure and validate, never to ship.

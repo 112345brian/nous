@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Text, View, Image, Pressable, type TextStyle } from 'react-native';
-import type { Block, Inline } from '../types';
+import type { Block, Inline } from '../../../utils/sepHtml/types';
 import type { Annotation } from '../../../types';
 import { SvgXml } from 'react-native-svg';
 import { InlineContent, InlineHandlers, hasMath, type Highlight } from './Inline';

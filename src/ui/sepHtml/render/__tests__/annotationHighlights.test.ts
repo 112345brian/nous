@@ -1,6 +1,6 @@
-import { annotationHighlights } from '../render/Blocks';
-import type { BlockHandlers } from '../render/Blocks';
-import type { Annotation } from '../../../types';
+import { annotationHighlights } from '../Blocks';
+import type { BlockHandlers } from '../Blocks';
+import type { Annotation } from '../../../../types';
 
 const ann = (partial: Partial<Annotation> & { selected_text: string }): Annotation => ({
   id: 1, slug: 'test', context: null, note: null, color: '#fbbf24',

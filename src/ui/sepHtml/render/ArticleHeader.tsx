@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Text, View } from 'react-native';
-import { parseSepHtml } from '../parse';
+import { parseSepHtml } from '../../../utils/sepHtml/parse';
 import { Blocks, type BlockHandlers } from './Blocks';
 import { useSepTheme } from './theme';
 

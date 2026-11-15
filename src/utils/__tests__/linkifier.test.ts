@@ -1,6 +1,10 @@
 // Characterization of linkifyHtml against the real bundled link index, written before the
 // linkifier was split into an injectable createLinkifier(). Snapshots hold the original output.
-import { linkifyHtml, createLinkifier } from '../linkifier';
+import { createLinkifier } from '../linkifier';
+import { LINK_MAP_JSON } from '../../assets/linkMapData';
+
+// The app builds this instance in src/composition.ts; here it is the same factory over the same index.
+const linkifyHtml = createLinkifier(LINK_MAP_JSON);
 
 const CASES: Record<string, string> = {
   'first mention only, case-insensitive': '<p>The problem of free will is old. Free will again, and FREE WILL.</p>',

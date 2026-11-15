@@ -1,7 +1,7 @@
 // Pure helpers for the article list. No React / RN imports so they stay testable
 // in plain node and belong to the inner (I/O-free) ring.
 
-import type { Block } from '../types';
+import type { Block } from '../../../utils/sepHtml/types';
 
 // Which list implementation SepArticle uses. 'flatlist' is the shipping default;
 // 'flashlist' is the FlashList v2 spike (see docs/library-research.md §5).

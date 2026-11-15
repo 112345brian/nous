@@ -12,7 +12,7 @@ import { ThemeProvider, useScheme, withTheme } from './src/theme/ThemeProvider';
 import { metaStore } from './src/composition';
 import { withWideFrame } from './src/components/WideFrame';
 import { isReduceMotion } from './src/ui/motion';
-import { APP_ACCENT } from './src/utils/sepHtml/render/theme';
+import { APP_ACCENT } from './src/ui/sepHtml/render/theme';
 import { IS_TEST_BUILD } from './src/testConfig';
 import MathRenderWebView from './src/components/MathRenderWebView';
 import TestRunnerScreen from './src/screens/TestRunnerScreen';

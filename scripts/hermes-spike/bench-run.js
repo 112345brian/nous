@@ -5,7 +5,7 @@ const clock = typeof performance !== 'undefined' && performance.now ? () => perf
 const N = 500;
 const eqs = gen(N);
 const t0 = clock();
-const { texToSvg } = require('../../src/utils/sepHtml/render/texToSvg');
+const { texToSvg } = require('../../src/services/texToSvg');
 const tRequire = clock();
 const first = texToSvg('x', false); // init: loads mathjax modules + builds TeX/SVG jax
 const tInit = clock();

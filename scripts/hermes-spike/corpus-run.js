@@ -5,7 +5,7 @@ const corpus = require('./corpus');
 const out = (s) => print(s);
 const now = () => Date.now();
 const t0 = now();
-const { texToSvg } = require('../../src/utils/sepHtml/render/texToSvg');
+const { texToSvg } = require('../../src/services/texToSvg');
 const tReq = now();
 texToSvg('x', false); // forces init
 const tInit = now();

@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { springTo } from '../ui/motion';
-import { InlineContent } from '../utils/sepHtml/render/Inline';
+import { InlineContent } from '../ui/sepHtml/render/Inline';
 import type { Inline } from '../utils/sepHtml/types';
 import { colors, themedStyles, roleMap } from '../theme/tokens';
 

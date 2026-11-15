@@ -169,6 +169,6 @@ describe('wiring', () => {
     expect(read('src/theme/ThemeProvider.tsx')).toMatch(/store\.setMeta\('appearance'/);
   });
   it('reader theme is cached per scheme', () => {
-    expect(read('src/utils/sepHtml/render/theme.ts')).toMatch(/getScheme\(\) === 'light' \? -base : base/);
+    expect(read('src/ui/sepHtml/render/theme.ts')).toMatch(/getScheme\(\) === 'light' \? -base : base/);
   });
 });

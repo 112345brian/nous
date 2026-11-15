@@ -1,20 +1,22 @@
 // Enforces the architecture rule: the INNER RING does no I/O.
 //
-// Rings
+// Rings (final)
 //   inner (pure):  src/types.ts, src/data/**, src/utils/**, src/core/**
-//                  src/core holds the ports (interfaces) and the use cases that take them as
-//                  parameters; adapters in src/services implement the ports, never the reverse.
-//   outer (I/O):   src/services/**, src/screens/**, src/components/**, src/ui/**, src/tests/**, App.tsx
-//   UI under utils: src/utils/sepHtml/render/** is React Native UI code that happens to live
-//                  under utils/. It is OUTER ring, so it is not scanned here and inner-ring files
-//                  must not import it. (motion.ts and useBackDismiss.ts moved to src/ui/.)
+//                  src/utils is pure helpers; src/core holds the ports (interfaces) and the use
+//                  cases, which take the ports as parameters. Adapters in src/services implement
+//                  the ports, never the reverse. src/utils has NO React, React Native or Expo
+//                  import at all: UI code lives in src/ui (and src/screens, src/components,
+//                  src/boot, src/theme).
+//   outer (I/O):   src/services/**, src/ui/**, src/screens/**, src/components/**, src/boot/**,
+//                  src/theme/**, src/tests/**, src/composition.ts, App.tsx
 //
 // An inner-ring file must not: import from an outer-ring directory (so no concrete adapter
 // such as services/db, expo-sqlite, expo-file-system), import any package other than the
 // allowlist, load modules dynamically (require / import()), call I/O, timer or clock APIs,
-// read process.env, or keep module-level mutable state (a hidden singleton). Files are parsed with the TypeScript compiler, so strings,
-// comments and regexes (e.g. the JS-in-a-string constants in injectedAssets.ts) never
-// cause false positives. Everything flows through scanSource(), which is self-tested below.
+// read process.env, or keep module-level mutable state (a hidden singleton). There are no
+// exceptions today. Files are parsed with the TypeScript compiler, so strings, comments and
+// regexes (e.g. the JS-in-a-string constants in injectedAssets.ts) never cause false positives.
+// Everything flows through scanSource(), which is self-tested below.
 import ts from 'typescript';
 
 declare function require(mod: string): any;
@@ -28,9 +30,8 @@ const ROOT: string = path.join(__dirname, '..', '..', '..');
 const ALLOWED_PACKAGES = new Set(['htmlparser2']);
 // Repo-relative prefixes that belong to the outer ring.
 const OUTER_PREFIXES = [
-  'src/services/', 'src/screens/', 'src/components/', 'src/tests/', 'src/composition', 'src/theme/',
-  'src/ui/',
-  'src/utils/sepHtml/render/', 'App', 'index',
+  'src/services/', 'src/screens/', 'src/components/', 'src/boot/', 'src/tests/', 'src/composition', 'src/theme/',
+  'src/ui/', 'App', 'index',
 ];
 const FORBIDDEN_CALLS = new Set([
   'fetch', 'setTimeout', 'setInterval', 'setImmediate', 'clearTimeout', 'clearInterval',
@@ -41,12 +42,9 @@ const FORBIDDEN_MEMBERS = new Set(['Date.now', 'performance.now', 'Math.random']
 
 export interface Violation { file: string; line: number; what: string }
 
-// Recorded, reasoned exceptions. Each must still match a real violation, or the test below
-// fails, so an exception cannot outlive the code it excuses.
-const KNOWN_EXCEPTIONS: Array<{ file: string; what: string; reason: string }> = [
-  { file: 'src/utils/linkifier.ts', what: 'module-level mutable binding "_default"',
-    reason: 'lazy default instance over the bundled link index; move to src/services after catalog.ts settles' },
-];
+// Recorded, reasoned exceptions. None today; an entry must name the file and the exact finding, and
+// the test below fails if the entry stops matching a real violation, so it cannot outlive its reason.
+const KNOWN_EXCEPTIONS: Array<{ file: string; what: string; reason: string }> = [];
 
 export function scanSource(file: string, text: string): Violation[] {
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
@@ -117,7 +115,7 @@ export function innerRingFiles(): string[] {
     for (const ent of fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
       const rel = `${dir}/${ent.name}`;
       if (ent.isDirectory()) {
-        if (ent.name === '__tests__' || rel === 'src/utils/sepHtml/render') continue;
+        if (ent.name === '__tests__') continue;
         walk(rel);
       } else if (/\.(ts|tsx)$/.test(ent.name)) {
         files.push(rel);
@@ -149,7 +147,9 @@ describe('inner ring has no I/O', () => {
       'src/utils/readSessions.ts', 'src/utils/libraryScope.ts']) {
       expect(files).toContain(f);
     }
-    expect(files).not.toContain('src/utils/sepHtml/render/Blocks.tsx');
+    // nothing is carved out of src/utils: the parser is in, and no UI file is
+    expect(files).toContain('src/utils/sepHtml/collectMathHashes.ts');
+    expect(files.filter(f => f.startsWith('src/ui/') || f.includes('/render/'))).toEqual([]);
   });
 
   test('no inner-ring file imports outer-ring code or does I/O', () => {
@@ -158,7 +158,13 @@ describe('inner ring has no I/O', () => {
     expect(unexcused.map(v => `${v.file}:${v.line} ${v.what}`)).toEqual([]);
   });
 
-  test('src/ui is outer ring: not scanned, and every file there is real UI code', () => {
+  test('src/utils holds no React, React Native or Expo import (UI code lives in src/ui)', () => {
+    const bad = files.filter(f => f.startsWith('src/utils/'))
+      .filter(f => /from ['"](react|react-native|expo[^'"]*|@react-native[^'"]*)['"]/.test(fs.readFileSync(path.join(ROOT, f), 'utf8')));
+    expect(bad).toEqual([]);
+  });
+
+  test('src/ui is outer ring: not scanned, and every top-level file there is real UI code', () => {
     expect(files.some(f => f.startsWith('src/ui/'))).toBe(false);
     const ui = fs.readdirSync(path.join(ROOT, 'src/ui')).filter((f: string) => /\.tsx?$/.test(f));
     expect(ui.length).toBeGreaterThan(0);
@@ -193,7 +199,7 @@ describe('scanSource (the check itself)', () => {
     expect(run(`import type { G } from '../services/graphDb';`)).toHaveLength(1);
     expect(run(`import { a } from '../screens/HomeScreen';`)).toHaveLength(1);
     expect(run(`export { a } from '../components/X';`)).toHaveLength(1);
-    expect(run(`import { R } from './sepHtml/render/Blocks';`)).toHaveLength(1);
+    expect(run(`import { R } from '../ui/sepHtml/render/Blocks';`)).toHaveLength(1);
     expect(run(`import x from '../../App';`)).toHaveLength(1);
   });
   test('flags non-allowlisted packages', () => {

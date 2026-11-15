@@ -6,7 +6,7 @@
 import React from 'react';
 import { FlatList } from 'react-native';
 import ReactTestRenderer from 'react-test-renderer';
-import type { ParsedArticle, Block } from '../../types';
+import type { ParsedArticle, Block } from '../../../../utils/sepHtml/types';
 
 jest.mock('react-native-safe-area-context', () => require('react-native-safe-area-context/jest/mock').default);
 require('@shopify/flash-list/jestSetup');

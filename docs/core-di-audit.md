@@ -8,93 +8,67 @@ uncommitted in the architecture-review worktree).
 Goal: every dependency the core needs is **injected**, never imported or created inside
 it, so the core runs and tests with fakes.
 
-## 1. The rings today
+## 1. The rings (final)
 
-| Ring | Where | Rule (enforced by `innerRing.test.ts`) |
+| Ring | Where | Rule (enforced by `src/utils/__tests__/innerRing.test.ts`) |
 |---|---|---|
-| Inner (pure) | `src/types.ts`, `src/data/**`, `src/utils/**` except `utils/sepHtml/render/**` | No I/O, no outer-ring imports, no timers/clock/random, no `process.env`, no module-level mutable state |
-| Core | `src/core/**` (new): `ports.ts` (interfaces only) and use cases that take ports as parameters | Same rules as inner; `ports.ts` may contain only types |
-| Adapters / wiring | `src/services/**` | Implement the ports; may import `src/core`; core never imports them |
-| UI | `src/screens/**`, `src/components/**`, `App.tsx`, `utils/sepHtml/render/**` | Call services (and, later, wired use cases) |
+| Inner (pure) | `src/types.ts`, `src/data/**`, `src/utils/**` | No I/O, no outer-ring imports, no timers, clock or random, no `process.env`, no module-level mutable state, and no React, React Native or Expo import. No exceptions. |
+| Core | `src/core/**`: `ports.ts` (interfaces only) and the use cases, which take their ports as parameters | Same rules as the inner ring; `ports.ts` may contain only types. |
+| Adapters | `src/services/**` | Implement the ports with the real library (`expo-sqlite`, `fetch`, `expo-file-system`, notifications, the MathJax WebView). May import `src/core`; the core never imports them; they never import the root. |
+| Root | `src/composition.ts` | The one place that builds the adapters and hands them to the use cases. Only it value-imports core use cases (rule RC3). |
+| UI | `src/screens/**`, `src/components/**`, `src/boot/**`, `src/theme/**`, `src/ui/**`, `App.tsx` | Take stores and use cases from the root, shapes from `src/types.ts`; import **nothing** from `src/services` (rule RC5). |
 
-Before this change there was no core ring: `catalog.ts` (use-case logic) and `db.ts`
-(SQLite) sat side by side in `services/`, and screens imported both.
+Before the core existed there was no such split: `catalog.ts` (use-case logic) and `db.ts`
+(SQLite) sat side by side in `services/`, and every screen imported both.
 
-## 2. Hidden dependencies, per module
+## 2. Where each module's dependencies ended up
 
-"Core" modules are the ones holding use-case logic. Adapters (`db.ts`, `graphDb.ts`,
-`mathRender.ts`, `downloadNotification.ts`) are allowed to be concrete; they are listed
-because they leak state or globals into the logic that calls them.
+The first version of this audit listed the hidden dependencies of every module; this is the
+outcome. "Core" means the logic is in `src/core` and the module's only remaining job is the
+adapter named.
 
-| Module | Hidden singletons / state | Concrete adapters imported | Implicit globals | Port(s) it needs | Status |
-|---|---|---|---|---|---|
-| `services/dataSync.ts` | none | `expo-file-system`, `react-native` `Platform`, `fetch`, `db` | `Date` (Zotero "today"), `process.env.HOME` | `SyncFolder`, `UserDataStore`, `ZoteroHttp`, `Clock` | **Converted** (see section 4) |
-| `utils/linkifier.ts` | `_default` (lazy cache of the compiled link index) | none (bundled data module only) | none | the index as a parameter | **Converted**: `createLinkifier(json)`; the lazy default is the one recorded exception |
-| `services/catalog.ts` | none | `./db`, `fetch` x3 (index, article and notes pages), `./perf` | `setTimeout` (the 30 s abort) | it is the adapter module for SEP pages; everything else it used to hold is in `src/core`, wired in `composition.ts` | **Converted** (section 4); only the upgrade-only `backfillMathHashFormat` remains in logic form (section 8) |
-| `services/db.ts` | `_open`/`_closing` (connection), `metaCache`, `_linkCache` | `expo-sqlite` | `Date.now` x7 | it **is** the `LibraryStore` / `UserStore` / `KeyValueStore` adapter; nothing to inject into it | **Pure logic moved out** (db-pure-logic, below); SQL and the caches stay |
-| `services/graphDb.ts` | none (schema-ready bookkeeping is instance state inside `createGraphStore`) | the connection is a parameter (`getDb`, passed by the root) | none | it **is** the `GraphStore` adapter: SQL only; assembly, TTLs and the layout key are in `core/graphAssembly.ts` | **Converted** (section 4) |
-| `services/inpho.ts` | `_primedSlugs` (Set) | `fetch`, `expo-file-system`, `getMeta/setMeta` | `Date.now` x2, `setTimeout` x1 | `GraphSource`, `KeyValueStore`, `Clock`, `Sleep` | **Converted and deleted**: the use cases are `core/graph.ts` (`_primedSlugs` is instance state), the adapter is `services/inphoSource.ts` (section 4) |
-| `services/mathRender.ts` | 7 module variables (`injectFn`, `domReady`, `resolveReady`, `readyPromise`, `mathJaxLoading`, `seq`, `pending`) forming a bridge to the WebView component | `expo-asset`, `expo-file-system` | `setTimeout` (timeout race) | `MathRenderer` (batch **and** readiness lifecycle) | Listed |
-| `services/downloadNotification.ts` | none now (the iOS permission flag is per sink instance) | `react-native` `NativeModules`/`Platform`, `expo-notifications` | `setTimeout` x2 (the 8 s dismiss, a platform call) | `ProgressNotifier` (core, throttle) over a `ProgressSink` (adapter) | **Converted**: `core/downloadNotifier.ts` holds the 3 s / 30 article throttle with the clock injected; the adapter keeps only the native and expo calls |
-| `services/seedImport.ts` | none | `expo-file-system` (+ `/legacy`), dynamic `import('./db')` to call `closeDb` | none | `SeedFiles`, `SeedDatabase`, `UserDataStore` (export/import), `KeyValueStore`, `Clock` | **Converted**: `core/seedImport.ts` holds download/validate/snapshot/swap/restore/rollback; the adapter is the file and connection calls only; wired in `composition.ts` as `importSeedFromUrl` |
-| `screens/*`, `App.tsx` | n/a (UI) | 10 files import `services/db` as a value (tracked by a shrink-only test) | `InteractionManager` (ArticleScreen only), `Date.now` (HistoryScreen, ArticleScreen `updated_at`, App auto-sync interval), `setTimeout` (UI debounces) | wired use cases | Listed |
+| Was | Now |
+|---|---|
+| `dataSync.ts` (sync folder, Zotero) | `core/syncUserData.ts`, `core/zotero.ts`; adapters `expoSyncFolder.ts`, `zoteroHttp.ts` |
+| `catalog.ts` (index refresh, article caching, bulk download, footnotes, backfills, math completion) | `core/refreshIndex.ts`, `cacheArticle.ts`, `libraryDownload.ts`, `ensureNotes.ts`, `backfills.ts`, `mathCompletion.ts`; `catalog.ts` is the three page fetchers |
+| `substitutemath`, the equation cache, the chunked renderer, the priority scheduler | `core/substituteMath.ts`, `mathCache.ts`, `mathChunked.ts`, `mathPacing.ts`, `idleScheduler.ts`; instances built in the root |
+| `mathRender.ts` (module-level WebView bridge) | `core/mathBridge.ts` (`createMathBridge`, one instance); `mathRender.ts` loads the MathJax asset |
+| `downloadNotification.ts`, `prefetch.ts`, `secureSecrets.ts` | `core/downloadNotifier.ts`, `core/prefetch.ts`, the `SecretStore` port; the platform calls stay in the adapters |
+| `seedImport.ts` | `core/seedImport.ts` behind `SeedFiles` and `SeedDatabase`; the adapter keeps the file and connection calls |
+| `graphDb.ts`, `inpho.ts` | `core/graph.ts`, `core/graphAssembly.ts`; adapters `graphDb.ts` (SQL) and `inphoSource.ts` (HTTP, dev seeds) |
+| Merge rules, migration runner, `buildTree`, `countWords` and other pure helpers in `db.ts` | `core/annotationMerge.ts`, `readsMerge.ts`, `migrations.ts`; `utils/readSessions.ts`, `libraryScope.ts`, `entryHash.ts` |
+| Screens calling `services/db` | stores and use cases from the root (`readerState`, `bookmarkStore`, `annotationStore`, `libraryRead`, `appPrefs`, `metaStore`, `loadArticleData`, ...) |
+| `utils/motion.ts`, `useBackDismiss.ts`, `utils/sepHtml/render/**` (React Native under `utils/`) | `src/ui/` (`texToSvg.ts`, an in-process MathJax engine, became the adapter `services/texToSvg.ts`; the unused `mathStore.ts` stub was deleted) |
+| `utils/linkifier.ts` lazy default instance | the pure factory only; the root holds the lazy instance |
+| `utils/perf.ts` default instance, `ThemeProvider` reading `db` | `services/perf.ts` (re-exported by the root); `ThemeProvider` takes a `KeyValueStore` prop |
 
-Not hidden dependencies (deliberately allowed): `atob`/`btoa` (pure, deterministic; used in
-`utils/sepHtml/parse.ts`), seeded constant tables (`new Set([...])`), `Math`, `JSON`.
+## 3. Composition root and direction of dependency (final)
 
-## 3. Composition root and direction of dependency
+`src/composition.ts` builds every adapter once and wires every core use case. What it owns:
 
-**`src/composition.ts` is the composition root.** It builds the concrete adapters and hands
-them to the core use cases; screens, `src/boot` and `App.tsx` import the use cases from it. Every converted
-use case is wired there and nowhere else:
+- the **math runtime**: the idle scheduler, the pacing helpers, the chunked renderer, the equation
+  cache, the substitution and the WebView bridge, each from `src/core`, each given its clock,
+  timer, renderer and store here;
+- the **use cases**: index refresh, article caching, footnotes, bulk download and sync (under the
+  math priority model's download hold), the AST backfill, deferred-math completion, sync-folder
+  and Zotero export, seed import, the download notifier, link prefetch, the common-equation
+  pre-warm, the graph;
+- the **stores the UI reads and writes** (`readerState`, `bookmarkStore`, `annotationStore`,
+  `libraryRead`, `appPrefs`, `metaStore`) and the UI use cases built over them;
+- the shared instances the UI needs (`idleScheduler`, `withDownloadHold`, `ensureMath`, `perf`).
 
-- sync-folder export/import and Zotero export (adapters `services/expoSyncFolder.ts`,
-  `services/zoteroHttp.ts`; the user-data store is a small object over `services/db`; the platform
-  and home directory are read here, at the edge);
-- the entry-index refresh, article caching, footnote fetching and the deferred-math pipeline
-  (adapters: `services/catalog.ts`, now just the three page fetchers; plus `services/perf.ts`,
-  the linkifier and the bundled seed index);
-- the **math runtime**, built once in the root and shared by the UI and the use cases: the idle
-  scheduler (holds, quiet-gap policy, background tasks), the pacing helpers around it, the
-  chunked renderer, the equation cache and the TeX substitution, all from `src/core`, each taking
-  its clock, timer, renderer and store as parameters. `idleScheduler`, `withDownloadHold` and
-  `ensureMath` are exported for the screens and the boot hook;
-- `downloadAll` and `syncCachedArticles`, wrapped in the math priority model's download hold
-  (`downloadAll` drains the queued math once the hold is released);
-- the background AST pass (`backfillAst`), paced by the priority model's `yieldThenMathMayRun`;
-- the common-equation pre-warm: its use case is `core/prewarmCommonMath.ts` (it already took
-  every dependency as a parameter and imports nothing), and the wiring that used to be
-  `services/commonMathWiring.ts` (the `meta` stamp, `ensureMath` at background priority,
-  the idle scheduler) is in the root, because connecting concrete adapters to a use case is what
-  the root is for;
-- link prefetch: `core/prefetch.ts` (`createPrefetcher`) takes `Connectivity`, `Interactions`, `Delay`,
-  `LinkLookup` and the "cache one article" function; the root builds the one instance and exports
-  `startPrefetch`. `services/prefetch.ts` is only the NetInfo and InteractionManager adapters.
-- download notification: `core/downloadNotifier.ts` (`createProgressNotifier`) over the platform
-  sink; the root exports `start/update/finishDownloadNotification` for `useBoot`.
-- secrets: the `SecretStore` port is in `core/ports.ts`; `services/secureSecrets.ts` implements it
-  (`secureSecretStore`) and keeps its named functions, which `db.ts` still imports.
-
-What still wires itself outside the root:
-
-- `src/boot/useBoot.ts` (the boot state machine, moved out of `App.tsx` upstream) connects the download progress callback to the notifier and calls `preloadMathJax()` (now taken from the root like the rest); it takes every use case from the root.
-- ~~`components/MathRenderWebView.tsx` registers itself into a module-level bridge in `services/mathRender.ts`~~: done, it registers into the root's `mathWebViewHost` (section 4).
-- Ten files outside the services still import the SQLite adapter (`services/db`) as a value:
-  `boot/useBoot`, `ArticleScreen`, `HomeScreen`, `GraphScreen`, `HistoryScreen`, `SettingsScreen`,
-  `ReadingListScreen`, `AnnotationsScreen`, `OrphanedAnnotationsBanner` and `theme/ThemeProvider`
-  (it stores the `appearance` preference with `getMeta`/`setMeta`).
-
-Direction of dependency, all enforced by tests (`innerRing.test.ts`, `compositionRoot.test.ts`):
+Direction of dependency, every rule enforced by a test:
 
 | Rule | Check |
 |---|---|
-| Inner ring and core never import outer code, or the root | `innerRing.test.ts` |
-| Adapters (`src/services/*`) never import the root | RC2 |
-| Only `composition.ts` wires core use cases (no exceptions today; a new one needs a reason and fails if it goes stale) | RC3 |
-| Screens, components and `App.tsx` take the converted use cases from the root, not from `catalog`/`prefetch` | RC4 |
-| The list of files that import `services/db` directly can only shrink (a new one fails; a migrated one must leave the list) | RC5 |
+| The inner ring and the core import nothing outside themselves, no React, Expo or React Native, call no I/O, timer or clock, keep no module state; no exceptions | `innerRing.test.ts` |
+| `ports.ts` contains only types | `innerRing.test.ts` |
+| RC2: adapters (`src/services`) never import the root | `compositionRoot.test.ts` |
+| RC3: only the root value-imports core use cases. Two recorded exceptions, both in the SQLite adapter (section 8) | `compositionRoot.test.ts` |
+| RC4: the UI takes the converted use cases from the root, not from where they used to live | `compositionRoot.test.ts` |
+| RC5: no UI, boot, theme or `src/ui` file imports anything from `src/services` (not even a type), and nothing outside the adapters, the core, tests and the root imports `services/db` | `compositionRoot.test.ts` |
 
-Each rule was checked by introducing a deliberate violation and confirming it fails.
+Each rule was checked by introducing a deliberate violation and confirming that it fails.
 
 ## 4. Converted now
 
@@ -165,49 +139,13 @@ Enforcement added to `innerRing.test.ts`: `src/core` is in the ring; it also fai
 `new Map/Set/WeakMap/WeakSet`; `ports.ts` must contain only types; recorded exceptions
 must still match a real violation, so they cannot go stale.
 
-## 5. Not converted, with a suggested order
+## 5. Order of work (all done)
 
-Order is by value over risk, and by which files other sessions are editing. Start these
-only after the performance and db sessions have merged, to avoid conflicts.
-
-1. ~~`catalog.refreshIndexIfStale`~~ (UC-A3): **done**, see section 4. It introduced
-   `KeyValueStore`, `ArticleSource.fetchIndexHtml` and `LibraryIndexStore`; `BundledIndex`
-   turned out to be a plain data parameter (`bundledEntries`), not a port.
-2. ~~`catalog.fetchAndCacheArticle`~~ (UC-C1, C7): **done**, see section 4. It introduced
-   `ArticleSource.fetchArticleHtml`/`fetchNotesHtml`, `ArticleLibrary`, `ArticleMath` and
-   `StageTimer`. `fetchNotesHtml` is passed through as it is (network plus a small
-   extraction in one function); splitting those is a follow-up.
-2b. ~~The deferred-math completion state machine~~ and ~~the equation pipeline behind it~~
-   (scheduler, pacing, chunked renderer, cache, substitution): **done**, see section 4. What is
-   left is the WebView bridge in `services/mathRender.ts` and the Hermes spike in
-   `mathRenderHermes.ts`, which are the renderer adapter itself: the core sees it only as the
-   injected `render` function (the `MathRenderer` port).
-3. ~~`downloadAll` / `syncCachedArticles`~~ and ~~the backfills~~ (UC-G1, G2, A4): **done**.
-   `backfillMathHashFormat` was left alone: see section 8.
-4. **Auto-sync decision in `App.tsx`** (lines ~166-171): a duplicated staleness rule
-   (`Date.now() - last > days`), same shape as `refreshIndexIfStale` and the InPhO TTL in
-   `inpho.ensureInphoIndex`. Extract one pure `isStale(now, last, ttl)` into `utils` and
-   use it in all three.
-5. ~~**Graph assembly in `graphDb.ts`**~~ **Done** (graph slice, section 4). (UC-F1, F2). Turning rows into nodes and edges is pure
-   and is a large part of the 474-line file; move it inward and leave SQL in the adapter. Also consider moving
-   the `_schema` table creation into the migration code (`db-connection-migrations`).
-6. ~~**`inpho.ts`**~~ **Done** (graph slice, section 4). (UC-F). `fetch` plus `getMeta/setMeta` plus the TTL: ports `GraphSource`,
-   `KeyValueStore`, `Clock`; the dev-seed file reading is a `__DEV__`-only adapter.
-7. **`mathRender.ts`**: the renderer adapter. The module-level bridge to the WebView component is the only
-   global-mutable coupling between a component and a service. Replace the six variables
-   with one object created by the composition root and passed to both sides.
-8. ~~`seedImport.ts`~~ (UC-A2): **done**, see section 3 row and `core/seedImport.ts`.
-9. ~~The composition root~~: **done for every converted use case**, see sections 3 and 4. What is
-   left is migrating the ten files that import `services/db` to wired use cases, one at a time,
-   removing each from the RC5 allowlist as it goes. `theme/ThemeProvider` is the easiest first
-   one: pass it a `KeyValueStore` from the root.
-10. **`db.ts`** splits (`LibraryStore` / `UserStore` / `KeyValueStore` / `SecretStore`) are the
-    adapters side of the same boundary; sequence them after `db-secrets` and
-    `db-connection-migrations` land.
-
-Pure helpers still inside `db.ts` that can move inward with a re-export once the db
-sessions are done: `buildTree`, `countWords` (the peer asked to keep these in place for
-now).
+The conversions this section used to queue are done, in this order: refresh index, article
+caching, deferred-math completion, composition root, bulk download and sync, backfills,
+footnotes, the equation runtime, the math render bridge, graph and InPhO, seed import,
+notification, prefetch and secrets, the UI off the SQLite adapter, and the pure logic out of
+`db.ts` and the services. Section 4 records each; section 8 lists what is left and why.
 
 ## 6. Corrections to `docs/use-cases.md`
 
@@ -312,20 +250,36 @@ Verified against the code. Please fold these into the draft.
   carry their own copies of `extractById`, `decodeEntities` and friends (now canonical in
   `src/utils/sepPage.ts`). They can drift.
 
-## 8. What is deliberately left outside the core, and why
+## 8. The known remainder: what is still outside the core, and why
 
-After merging `math-throttle`, `delete-legacy-compat`, `tiered-math` and the rest of the parent
-branch, and converting everything this audit listed, these remain outside `src/core` on purpose.
+Everything above is in `src/core` or is an adapter. These are the things that remain, with the
+reason each cannot (or should not) move.
 
-| Left in place | Where | Why |
+**Adapters with their own state.** An adapter is allowed to be concrete and to hold state about
+the thing it wraps. What is left:
+
+| Where | State | Why it stays |
 |---|---|---|
-| `backfillMathHashFormat` | `services/catalog.ts`, scheduled from `src/boot/useBoot.ts` | Upgrade-only code (it migrates an earlier build's inline-base64 math format; guarded by `math_hash_format_v1`). The brief said `delete-legacy-compat` had deleted it; at the parent tip it is still defined and still scheduled, and `LEGACY_RE` is its regex. By the prerelease rule it should be deleted, not converted, and that is the project owner's call. It touches only the database and the equation table, calls no converted use case, and so does not block anything. |
-| `services/mathRender.ts` and `mathRenderHermes.ts` | `services/` | Adapters only now. `mathRender.ts` is `loadMathJaxScript()` (`expo-asset` + `expo-file-system` + the injected snippet) with no state; the bridge protocol and its state are `core/mathBridge.ts` (`createMathBridge`), one instance built in the root (section 4). `mathRenderHermes.ts` is a second `MathRenderer` that the root picks by `EXPO_PUBLIC_MATH_HERMES` (required lazily in that branch). Left as a known quirk, unchanged: a `preload` that runs before the WebView has registered drops the injected script and is not retried (`loading` stays set), so that render path then times out; boot ordering avoids it today. |
-| `db.ts`, `graphDb.ts`, `inphoSource.ts`, `seedImport.ts`, `secureSecrets.ts`, `downloadNotification.ts`, `mathRender.ts`, `expoSyncFolder.ts`, `zoteroHttp.ts` | `services/` | These are the adapters. They are allowed to be concrete. |
-| `utils/sepHtml/render/**` | `utils/` | React Native UI code that sits under `utils/`; still an outer-ring exception in `innerRing.test.ts`. (`motion.ts` and `useBackDismiss.ts` moved to `src/ui/`, which counts as outer ring.) |
-| `theme/` | UI | Outer ring by definition (the enforcement test lists it). |
-| `useBoot` notifier wiring | UI | See section 3. (The `MathRenderWebView` bridge now registers into the root's instance: section 4.) |
-| Module state in adapters: none left in these slices: `attempted` in prefetch is instance state in `core/prefetch.ts` and the WebView bridge variables are closure state in `core/mathBridge.ts` | `services/` | Allowed at the edge. (The cache, the scheduler and the pacing are now instances built in the root; `_resetMathCacheState` is just that instance's `reset`.) |
+| `services/db.ts` | the one connection (`_open`, `_closing`), `metaCache`, `_linkCache` | It is the SQLite adapter. Every other adapter calls `getDb()`. Making it an injected instance means threading that instance through `graphDb`, `seedImport` and the rest, a separate change. |
+| `services/texToSvg.ts` | the lazily built MathJax document (`_doc`, `_adaptor`, `_initError`) | The in-process MathJax engine behind the flagged Hermes spike: a lazily initialised engine is what an adapter is. |
+| `services/secureSecrets.ts` | the lazily required `expo-secure-store` module (`mod`) | It throws at import when the native module is not linked, so the `require` must stay lazy. |
+
+**Two recorded exceptions to RC3 ("only the root wires core use cases").** `services/db.ts`
+calls the core's migration runner and merge rules over its own connection when it opens and when
+it imports user data, and `services/migrations.ts` is a one-line re-export of the core runner for
+`graphDb.ts`. They take a database handle, so they belong in the core; the adapter composes them
+over the handle it owns because it cannot import the root (RC2). The way out is the same change
+as above: the root creates the database instance and passes the migrations and merge rules in.
+
+**Left alone on purpose.**
+
+- `scripts/test-download.mjs`, `scripts/buildEntrySeed.js` and `scripts/auditCorpus.cjs` carry
+  their own copies of the page-extraction helpers (now canonical in `src/utils/sepPage.ts`).
+  They are build scripts outside the app.
+- `origin/new-spinner`, an older unrelated UI feature (an animated logo), was not merged.
+- The suspected bugs in section 7 that were pinned in tests but not fixed (a failed download
+  counts as done; an offline sync still records `last_deep_sync`; the article-request abort timer
+  is cleared before the body is read; an offline first launch stamps the bundled seed as fresh).
 
 ### What the parent's new code added to the picture
 

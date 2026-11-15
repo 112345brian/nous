@@ -14,18 +14,17 @@ import type { RouteProp } from '@react-navigation/native';
 import { makeExcerpt } from '../utils/excerpt';
 import {
   onMathReady, ensureNotesCached, startPrefetch, idleScheduler, loadArticleData,
-  libraryRead, readerState, bookmarkStore, annotationStore, metaStore,
+  libraryRead, readerState, bookmarkStore, annotationStore, metaStore, perf,
 } from '../composition';
-import { perf } from '../services/perf';
 import { primeBackfillForSlugs, primeGraphLayouts } from '../composition';
 import { buildArticleHtml } from '../utils/articleTemplate';
 import { parseSepHtml } from '../utils/sepHtml/parse';
 import { collectMathHashes } from '../utils/sepHtml/collectMathHashes';
-import { SepArticle, type SepArticleHandle } from '../utils/sepHtml/render/SepArticle';
-import { ArticleHeader } from '../utils/sepHtml/render/ArticleHeader';
+import { SepArticle, type SepArticleHandle } from '../ui/sepHtml/render/SepArticle';
+import { ArticleHeader } from '../ui/sepHtml/render/ArticleHeader';
 import { springTo } from '../ui/motion';
 import { useBackDismiss } from '../ui/useBackDismiss';
-import { SepThemeProvider, parseReaderFontSize, DEFAULT_READER_FONT } from '../utils/sepHtml/render/theme';
+import { SepThemeProvider, parseReaderFontSize, DEFAULT_READER_FONT } from '../ui/sepHtml/render/theme';
 import type { Inline } from '../utils/sepHtml/types';
 import AnnotationModal from '../components/AnnotationModal';
 import TocSheet, { TOC_SHEET_H } from '../components/TocSheet';

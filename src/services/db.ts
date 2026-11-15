@@ -113,7 +113,7 @@ export async function getEntryCounts(scope: 'all' | 'sep' | 'owl' = 'all'): Prom
   return { total: row?.total ?? 0, cached: row?.cached ?? 0 };
 }
 
-// ── Client-rendered math cache (see src/utils/sepHtml/render/mathStore.ts) ──
+// ── Client-rendered math cache (see (removed; math is rendered by core/substituteMath.ts)) ──
 
 export interface MathRow {
   hash: string;

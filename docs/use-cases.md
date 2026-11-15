@@ -116,46 +116,39 @@ missing behavior, see section 4.
 
 ## 3. Ports the use cases need
 
-These are the outbound interfaces, as they exist in `src/core/ports.ts`. Each use case in
-`src/core` takes the ports it needs as a parameter and never imports an adapter; the adapters
-live in `src/services`, and `src/composition.ts` is the one place that builds them and hands
-them over. Screens and `src/boot` import the wired use cases from `composition.ts`.
-(`docs/core-di-audit.md` has the audit behind this list and what is still outside the core.)
+The outbound interfaces, as they exist in `src/core/ports.ts`. Each use case in `src/core` takes
+the ports it needs as a parameter and never imports an adapter; the adapters live in
+`src/services`; `src/composition.ts` is the one place that builds them and hands them over.
+Screens, `src/boot` and `App.tsx` take stores and wired use cases from the root and import
+nothing from `src/services`. (`docs/core-di-audit.md` has the audit, the rules that enforce this,
+and what is still outside the core.)
 
-| Port (in `src/core/ports.ts`) | Used by | Implemented by (adapter) |
-|---|---|---|
-| `ArticleSource` (`fetchIndexHtml`, `fetchArticleHtml`, `fetchNotesHtml`) | A3, C1, C4, C7, G2 | `services/catalog.ts` (`fetch`, 30 s abort) |
-| `LibraryIndexStore` (count, upsert entries, clean titles, all titles, invalidate link cache) | A3 | `services/db.ts` |
-| `ArticleLibrary` (`cacheArticle`, `indexLinks`) | C1, C7, G1, G2 | `services/db.ts` |
-| `NotesStore` (`setEntryNotes`) | C4 | `services/db.ts` |
-| `ArticleMathStore` (read and rewrite an article's body, store its AST) | C6 | `services/db.ts` |
-| `ArticleMath` (`substitute`: render now; `completeLater`: render in the background; `queueForLater`: record the debt only) | C1, C6, G1, G2 | `services/catalog.ts` (`substitutemath`) plus the pipeline in `core/mathCompletion.ts` |
-| `MathRenderer` (`render`: typeset equations, one result per request) | C1, C6 | `core/mathBridge.ts` (WebView bridge, one instance in the root) + `services/mathRender.ts` (asset loader); flagged Hermes spike in `services/mathRenderHermes.ts` |
-| `MathStore` (`getMathByHashes`, `putMathBatch`: the equation table) | C6 | `services/db.ts` |
-| `LibraryCacheStatus` (cached and uncached entries) | G1, G2 | `services/db.ts` |
-| `LibraryBackfillStore` (articles with no AST) | A4 | `services/db.ts` |
-| `KeyValueStore` (`getMeta`, `setMeta`: stamps, flags, the pending-math list) | A3, A4, C6, G2 | `services/db.ts` (`meta` table) |
-| `UserDataStore<T>` and `SyncFolder` (read and write the user-data file) | H3, H4 | `services/db.ts` and `services/expoSyncFolder.ts` (`expo-file-system`) |
-| `ZoteroHttp` (`post`) | E4 | `services/zoteroHttp.ts` (`fetch`) |
-| `StageTimer` (dev-only stage timing) | C1 | `services/perf.ts` |
-| `Clock`, `Sleep` | A3, E4, G1, G2 | `Date.now` and a timer, supplied by the root |
-| the pre-warm's own deps (`PrewarmDeps`, in `core/prewarmCommonMath.ts`) | A4 (common equations) | the root, from `ensureMath` at background priority, the `meta` table and the idle scheduler |
+| Group | Ports | Used by | Adapter |
+|---|---|---|---|
+| Time and settings | `Clock`, `Sleep`, `KeyValueStore` (`getMeta`, `setMeta`) | A3, A4, C6, E4, G1, G2 | `Date.now` and a timer supplied by the root; `services/db.ts` (`meta` table) |
+| Entry index and articles | `ArticleSource` (index, article and notes pages), `LibraryIndexStore`, `ArticleLibrary` (`cacheArticle`, `indexLinks`), `NotesStore`, `CachedArticleFields` | A3, C1, C4, C7, G2 | `services/catalog.ts` (`fetch`, 30 s abort); `services/db.ts` |
+| Equations | `MathRenderer` (`render`), `MathStore` (the equation table), `ArticleMath` (`substitute`, `completeLater`, `queueForLater`), `ArticleMathStore`, `MathRequest` and `MathResult` | C1, C6, G | `core/mathBridge.ts` (one WebView bridge instance) with `services/mathRender.ts` (asset loader), `services/texToSvg.ts` (flagged Hermes engine); `services/db.ts` |
+| Bulk work | `LibraryCacheStatus`, `LibraryBackfillStore`, `StageTimer` | A4, G1, G2, C1 | `services/db.ts`; `services/perf.ts` |
+| User data and Zotero | `UserDataStore<T>`, `SyncFolder`, `ZoteroHttp` | E4, H3, H4 | `services/db.ts`; `services/expoSyncFolder.ts`; `services/zoteroHttp.ts` |
+| Seed import | `SeedFiles`, `SeedDatabase`, `SeedUserDataShape` | A2 | `services/seedImport.ts` (files and connection) over `expo-file-system` and `services/db.ts` |
+| Notification and prefetch | `ProgressNotifier`, `ProgressSink`, `Connectivity`, `Interactions`, `Delay`, `LinkLookup`, `ConnectionInfo` | G1 | `services/downloadNotification.ts`; `services/prefetch.ts` (NetInfo, InteractionManager) |
+| Secrets | `SecretStore` (`available`, `get`, `set`, `delete`) | H2, E4 | `services/secureSecrets.ts` (`expo-secure-store`) |
+| Graph | `GraphSource` (InPhO reads), `GraphStore`, `GraphArticles`, `RelationsRow`, `LayoutRow`, `GraphEntryRow` | F1, F2 | `services/inphoSource.ts` (`fetch`, dev seeds); `services/graphDb.ts` |
+| What the screens read and write | `ReaderStateStore`, `BookmarkStore`, `AnnotationStore`, `LibraryReadStore`, `AppPrefsStore` (plus `KeyValueStore`) | B, C, D, E, H | `services/db.ts`, exposed by the root as `readerState`, `bookmarkStore`, `annotationStore`, `libraryRead`, `appPrefs`, `metaStore` |
+| The database handle | `SqlRunner`, `MigrationDb` | the migration runner and the merge rules | `services/db.ts` (`expo-sqlite`) |
 
-Not behind a port yet, and why:
+The pre-warm's own dependencies (`PrewarmDeps`, in `core/prewarmCommonMath.ts`) are supplied by
+the root: `ensureMath` at background priority, the `meta` table and the idle scheduler. The idle
+scheduler and the math pacing (`core/idleScheduler.ts`, `core/mathPacing.ts`) are core modules
+that take the clock, a timer and the interaction hook as parameters; the one app-wide instance
+is built in the root.
 
-- **The idle scheduler and the math pacing** (`core/idleScheduler.ts`, `core/mathPacing.ts`) are
-  core modules that take the clock, a timer and the interaction hook as parameters; the one
-  app-wide instance is built in `composition.ts`, and the use cases see it as the injected
-  `pause` and `substitute` functions.
-- **`GraphSource` / `GraphStore`** (F): done. `core/graph.ts` holds the use cases, `services/graphDb.ts` and `services/inphoSource.ts` are the adapters, `composition.ts` wires them.
-- **`SecretStore`** (H2, E4): the Zotero key now lives in secure storage (`services/secureSecrets.ts`)
-  and reaches the use case as a parameter; there is no port because nothing else needs one.
-- **`ProgressNotifier`** (G1): progress reaches the caller as a callback and the download
-  notification is connected in `src/boot/useBoot.ts`.
-- **`Scheduler`**: the idle scheduler is used through `pause` and by the root, not by the core.
+Still outside the core, and why: see section 8 of `docs/core-di-audit.md` (the SQLite adapter
+itself and two lazily initialised engines; nothing else).
 
-`LibraryStore` and `UserStore` are one SQLite file today. Splitting them (content
-is replaceable, user data never is) is the clean boundary. The seed-import fix works around the shared file by exporting and restoring user data; splitting the file would remove the need.
+`LibraryStore` and `UserStore` are one SQLite file today. Splitting them (content is replaceable,
+user data never is) is the clean boundary. The seed-import fix works around the shared file by
+exporting and restoring user data; splitting the file would remove the need.
 
 ## 4. Gaps
 
