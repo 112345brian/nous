@@ -1,4 +1,4 @@
-import type { EntryRef, EntryRow, IndexEntry, LibraryScope } from '../types';
+import type { EntryRef, EntryRow, GraphEdge, IndexEntry, InphoNodeRow, LibraryScope } from '../types';
 import type { MathPriority } from '../utils/mathThrottlePolicy';
 
 // Ports: the outward-facing interfaces the core needs. Plain TypeScript only.
@@ -167,3 +167,63 @@ export interface MathStore {
   putMathBatch(rows: Array<{ hash: string; svg: string; w: number; h: number; display: boolean }>): Promise<void>;
 }
 
+// ── Knowledge graph ──────────────────────────────────────────────────────────
+
+/** Where InPhO data comes from. Both methods swallow every failure and say so with null. */
+export interface GraphSource {
+  /** JSON at an InPhO path such as '/idea.json'; null on a network error, a non-OK status or bad JSON. */
+  fetchJson(path: string): Promise<any | null>;
+  /**
+   * The index lists read from files a dev build injected into the app (idea list, thinker list,
+   * both parsed); null in a release build, or when a file is missing or malformed.
+   */
+  readDevSeed(): Promise<{ ideas: unknown; thinkers: unknown } | null>;
+}
+
+/** A cached InPhO relations record exactly as stored. */
+export interface RelationsRow { slug: string; payload: string; fetched_at: number }
+/** A stored layout record exactly as stored. */
+export interface LayoutRow { layout_key: number; positions: string }
+/** The slice of an entry the graph shows. */
+export interface GraphEntryRow { slug: string; title: string; read_progress: number | null }
+
+/**
+ * The graph tables plus the reading tables they join to. Rows in, rows out: assembling nodes and
+ * edges, the cache lifetime rules and the layout key are the core's job. The adapter creates the
+ * graph tables itself (the first time each database connection is used).
+ */
+export interface GraphStore {
+  // SEP link graph
+  outgoingLinks(slug: string, limit: number): Promise<GraphEdge[]>;
+  incomingLinks(slug: string, limit: number): Promise<GraphEdge[]>;
+  /** Entries by slug; slugs that are not entries are simply absent. */
+  entriesBySlugs(slugs: string[]): Promise<GraphEntryRow[]>;
+  /** Every slug the reader has opened, once each. */
+  readSlugs(): Promise<string[]>;
+  // InPhO index
+  indexCount(): Promise<number>;
+  /** Replace the whole index; years and dates_checked already fetched for a (kind, id) are kept. */
+  replaceIndex(nodes: InphoNodeRow[]): Promise<void>;
+  /** The node for an SEP slug, an idea in preference to a thinker. */
+  nodeBySep(slug: string): Promise<InphoNodeRow | null>;
+  /** Nodes with these idea ids or these thinker ids. */
+  nodesByIds(ideaIds: number[], thinkerIds: number[]): Promise<InphoNodeRow[]>;
+  /** Birth and death years of the thinker node for this slug. */
+  thinkerDatesBySep(slug: string): Promise<{ birth_year: number | null; death_year: number | null } | null>;
+  /** Thinker nodes among `ids` whose dates were never fetched, in no particular order. */
+  thinkersMissingDates(ids: number[]): Promise<InphoNodeRow[]>;
+  /** Record a thinker's years (null = none recorded) and mark the dates as fetched. */
+  setDates(id: number, birth: number | null, death: number | null): Promise<void>;
+  // Relations cache
+  relationsRows(slugs: string[]): Promise<RelationsRow[]>;
+  putRelations(slug: string, payload: string, fetchedAt: number): Promise<void>;
+  // Layout cache
+  layoutRow(centerSlug: string, mode: string): Promise<LayoutRow | null>;
+  putLayoutRow(centerSlug: string, mode: string, key: number, positions: string, createdAt: number): Promise<void>;
+}
+
+/** The article rows the graph preview card reads. */
+export interface GraphArticles {
+  getPreview(slug: string): Promise<{ title: string; author: string | null; excerpt: string | null } | null>;
+  getHtml(slug: string): Promise<string | null>;
+}

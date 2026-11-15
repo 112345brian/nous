@@ -1,5 +1,5 @@
 // graphDb owns the InPhO tables inside the shared sep.db and versions them
-// under its own scope. Through the public API: inphoIndexCount() needs the
+// under its own scope. Through the GraphStore port: indexCount() needs the
 // schema, so calling it exercises the lazy setup.
 
 
@@ -16,7 +16,8 @@ beforeEach(() => {
   fake = require('./helpers/fakeExpoSqlite');
   fake.reset();
   db = require('../db');
-  graph = require('../graphDb');
+  const store = require('../graphDb').createGraphStore(db.getDb);
+  graph = { inphoIndexCount: () => store.indexCount() };
 });
 
 const tables = (r: any): string[] =>

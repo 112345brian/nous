@@ -32,8 +32,8 @@ because they leak state or globals into the logic that calls them.
 | `utils/linkifier.ts` | `_default` (lazy cache of the compiled link index) | none (bundled data module only) | none | the index as a parameter | **Converted**: `createLinkifier(json)`; the lazy default is the one recorded exception |
 | `services/catalog.ts` | none | `./db`, `fetch` x3 (index, article and notes pages), `./perf` | `setTimeout` (the 30 s abort) | it is the adapter module for SEP pages; everything else it used to hold is in `src/core`, wired in `composition.ts` | **Converted** (section 4); only the upgrade-only `backfillMathHashFormat` remains in logic form (section 8) |
 | `services/db.ts` | `_db` (connection), `metaCache`, `_linkCache` | `expo-sqlite` | `Date.now` x7 | it **is** the `LibraryStore` / `UserStore` / `KeyValueStore` adapter; nothing to inject into it | Listed; 4 sessions editing it |
-| `services/graphDb.ts` | `_schema` (creates its own tables lazily) | `getDb()` x4 from `./db` | `Date.now` x4 | `GraphStore` adapter; the graph assembly (nodes/edges from rows) is pure and could move inward | Listed |
-| `services/inpho.ts` | `_primedSlugs` (Set) | `fetch` (`getJson`), `expo-file-system` (dev-seed files, `__DEV__` only), `getMeta/setMeta` from `./db` | `Date.now` x2, `setTimeout` x1 | `GraphSource`, `KeyValueStore`, `Clock`, `Sleep` | Listed |
+| `services/graphDb.ts` | none (schema-ready bookkeeping is instance state inside `createGraphStore`) | the connection is a parameter (`getDb`, passed by the root) | none | it **is** the `GraphStore` adapter: SQL only; assembly, TTLs and the layout key are in `core/graphAssembly.ts` | **Converted** (section 4) |
+| `services/inpho.ts` | `_primedSlugs` (Set) | `fetch`, `expo-file-system`, `getMeta/setMeta` | `Date.now` x2, `setTimeout` x1 | `GraphSource`, `KeyValueStore`, `Clock`, `Sleep` | **Converted and deleted**: the use cases are `core/graph.ts` (`_primedSlugs` is instance state), the adapter is `services/inphoSource.ts` (section 4) |
 | `services/mathRender.ts` | 7 module variables (`injectFn`, `domReady`, `resolveReady`, `readyPromise`, `mathJaxLoading`, `seq`, `pending`) forming a bridge to the WebView component | `expo-asset`, `expo-file-system` | `setTimeout` (timeout race) | `MathRenderer` (batch **and** readiness lifecycle) | Listed |
 | `services/downloadNotification.ts` | `state` (throttle bookkeeping) | `react-native` `NativeModules`/`Platform`, `expo-notifications` | `Date.now` x1, `setTimeout` x2 | `ProgressNotifier` adapter | Already injected into the core (see section 3) |
 | `services/seedImport.ts` | none | `expo-file-system` (+ `/legacy`), dynamic `import('./db')` to call `closeDb` | none | `SeedInstaller` (download, close DB, replace file) | Not touched: `db-seed-import-safety` is rewriting it |
@@ -131,6 +131,30 @@ unchanged after the move; a deliberate mutation of the defer rule is caught by 2
 wrapper tests (`src/services/__tests__/refreshIndex.test.ts`, 17 tests) were also written
 before the move and are unchanged after it.
 
+**Knowledge graph (graph/InPhO slice).** `services/graphDb.ts` (SQL plus assembly plus lazy schema)
+and `services/inpho.ts` (fetch, dev-seed files, TTL, `_primedSlugs`) are split:
+
+| Piece | Where now |
+|---|---|
+| Ports `GraphSource` (InPhO JSON, dev-seed files), `GraphStore` (graph tables and the joins to `entries`, `reads`, `links`), `GraphArticles` (the preview card's article reads); `KeyValueStore`, `Clock`, `Sleep` reused | `core/ports.ts` |
+| Pure assembly: link graph, related / timeline / influence graphs, corpus resolution, edge weights (teacher/student 3, other influence 1.5, times the Wikidata weight), the 7-day relations and 90-day index rules, InPhO payload parsing, the layout key | `core/graphAssembly.ts` |
+| Use cases: `ensureInphoIndex`, `getGraph`, `getArticleLinkGraph`, `primeBackfillForSlugs`, `primeGraphLayouts`, `getLayoutCache` / `setLayoutCache`, `getNodePreview`, `getVisitedOnly` / `setVisitedOnly`; `primed` slugs are instance state | `core/graph.ts` (`createGraph`) |
+| Graph and layout types | `types.ts` |
+| SQL and the graph schema (versioned under scope `graph`; ready-state per connection, in the instance) | `services/graphDb.ts` (`createGraphStore(getDb)`) |
+| `fetch` and `expo-file-system` dev seeds | `services/inphoSource.ts` (`inphoSource`); `inpho.ts` is deleted |
+| Wiring | `composition.ts`, "Knowledge graph" section |
+
+`GraphScreen` now imports nothing from `services/` (it left the RC5 allowlist): its preview card, which
+read the article rows and held `findLinkSentence` inside the component, is `getNodePreview` (with
+`utils/linkSentence.ts`), and its "visited only" preference is `getVisitedOnly` / `setVisitedOnly`.
+`getGraphData` (the global link graph) had no caller and was deleted. A side effect of assembling in the
+core: the InPhO builders read the entries they need in one query instead of scanning every entry with
+progress above zero.
+Tests: `src/services/__tests__/graph.characterization.test.ts` (35 tests, written against the old
+modules first and unchanged after the move except for where `api()` finds the functions) and
+`src/core/__tests__/graph.test.ts` (24 tests with in-memory fakes; `Date.now`, `setTimeout` and `fetch`
+throw). Mutations caught: relations TTL `>` to `>=` (3 tests), teacher/student weight 3 to 2 (2 tests).
+
 Enforcement added to `innerRing.test.ts`: `src/core` is in the ring; it also fails on
 `process.*`, a bare `Date()`, module-level `let`/`var`, and an empty module-level
 `new Map/Set/WeakMap/WeakSet`; `ports.ts` must contain only types; recorded exceptions
@@ -159,10 +183,10 @@ only after the performance and db sessions have merged, to avoid conflicts.
    (`Date.now() - last > days`), same shape as `refreshIndexIfStale` and the InPhO TTL in
    `inpho.ensureInphoIndex`. Extract one pure `isStale(now, last, ttl)` into `utils` and
    use it in all three.
-5. **Graph assembly in `graphDb.ts`** (UC-F1, F2). Turning rows into nodes and edges is pure
+5. ~~**Graph assembly in `graphDb.ts`**~~ **Done** (graph slice, section 4). (UC-F1, F2). Turning rows into nodes and edges is pure
    and is a large part of the 474-line file; move it inward and leave SQL in the adapter. Also consider moving
    the `_schema` table creation into the migration code (`db-connection-migrations`).
-6. **`inpho.ts`** (UC-F). `fetch` plus `getMeta/setMeta` plus the TTL: ports `GraphSource`,
+6. ~~**`inpho.ts`**~~ **Done** (graph slice, section 4). (UC-F). `fetch` plus `getMeta/setMeta` plus the TTL: ports `GraphSource`,
    `KeyValueStore`, `Clock`; the dev-seed file reading is a `__DEV__`-only adapter.
 7. **`mathRender.ts`**: the renderer adapter. The module-level bridge to the WebView component is the only
    global-mutable coupling between a component and a service. Replace the six variables
@@ -292,7 +316,7 @@ branch, and converting everything this audit listed, these remain outside `src/c
 |---|---|---|
 | `backfillMathHashFormat` | `services/catalog.ts`, scheduled from `src/boot/useBoot.ts` | Upgrade-only code (it migrates an earlier build's inline-base64 math format; guarded by `math_hash_format_v1`). The brief said `delete-legacy-compat` had deleted it; at the parent tip it is still defined and still scheduled, and `LEGACY_RE` is its regex. By the prerelease rule it should be deleted, not converted, and that is the project owner's call. It touches only the database and the equation table, calls no converted use case, and so does not block anything. |
 | `services/mathRender.ts` and `mathRenderHermes.ts` | `services/` | The renderer adapter: the WebView bridge (module-level `injectFn`, `readyPromise`, `pending`, `seq`, loaded from `expo-asset` and `expo-file-system`) and the flagged Hermes spike. The core sees it only as the injected `render` function. Making the bridge an instance owned by the root, with `MathRenderWebView` registering into it, would remove the last module-level coupling between a component and a service; it is a separate change. |
-| `db.ts`, `graphDb.ts`, `inpho.ts`, `seedImport.ts`, `secureSecrets.ts`, `downloadNotification.ts`, `mathRender.ts`, `expoSyncFolder.ts`, `zoteroHttp.ts` | `services/` | These are the adapters. They are allowed to be concrete. The pure graph-assembly logic inside `graphDb.ts` and the TTL logic in `inpho.ts` could move inward (section 5, items 4 to 6). |
+| `db.ts`, `graphDb.ts`, `inphoSource.ts`, `seedImport.ts`, `secureSecrets.ts`, `downloadNotification.ts`, `mathRender.ts`, `expoSyncFolder.ts`, `zoteroHttp.ts` | `services/` | These are the adapters. They are allowed to be concrete. |
 | Ten files that import `services/db` | UI and boot | Shrink-only list (RC5). Each needs a wired use case first. |
 | `utils/motion.ts`, `utils/useBackDismiss.ts`, `utils/sepHtml/render/**` | `utils/` | React Native UI code that sits under `utils/`. Recorded as outer-ring exceptions in `innerRing.test.ts` (each is checked to still import react or react-native). They belong in a `ui/` folder; moving them touches imports in files other sessions edit. |
 | `theme/` | UI | Outer ring by definition (the enforcement test lists it). |

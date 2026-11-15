@@ -91,3 +91,22 @@ export type DownloadProgress = {
   total: number;
   current: string;
 };
+
+// ── Knowledge graph (InPhO + SEP link graph) ─────────────────────────────────
+
+export interface GraphData { nodes: GraphNode[]; edges: GraphEdge[]; }
+
+export interface InphoNodeRow {
+  id: number; kind: 'idea' | 'thinker'; label: string; sep_dir: string | null;
+  birth_year?: number | null; death_year?: number | null;
+}
+export interface InphoInfluence { teachers: number[]; students: number[]; influenced: number[]; influenced_by: number[]; }
+export interface InphoRelations { ideas: number[]; thinkers: number[]; influence?: InphoInfluence; }
+
+/** InPhO semantic-graph modes. */
+export type GraphMode = 'related' | 'timeline' | 'influence';
+/** The views the graph screen toggles between: the SEP hyperlink graph plus the InPhO modes. */
+export type GraphView = 'links' | GraphMode;
+
+/** A settled layout position as a 0-1 fraction of the canvas, so it survives rotation. */
+export interface CachedPosition { slug: string; xRel: number; yRel: number; }

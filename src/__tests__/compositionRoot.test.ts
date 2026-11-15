@@ -66,6 +66,9 @@ const CONVERTED = [
   'onMathReady', 'completeArticleMath', 'resumePendingMath',
   'backfillAst', 'ensureNotesCached', 'startPrefetch', 'scheduleCommonMathPrewarm',
   'idleScheduler', 'withDownloadHold', 'ensureMath',
+  // knowledge graph
+  'getGraph', 'getArticleLinkGraph', 'ensureInphoIndex', 'primeBackfillForSlugs', 'primeGraphLayouts',
+  'getLayoutCache', 'setLayoutCache', 'getNodePreview', 'getVisitedOnly', 'setVisitedOnly',
 ];
 
 // RC3 exceptions: a file other than composition.ts that still wires a core use case.
@@ -79,7 +82,6 @@ const DB_DIRECT_ALLOWLIST = [
   'src/components/OrphanedAnnotationsBanner.tsx',
   'src/screens/AnnotationsScreen.tsx',
   'src/screens/ArticleScreen.tsx',
-  'src/screens/GraphScreen.tsx',
   'src/screens/HistoryScreen.tsx',
   'src/screens/HomeScreen.tsx',
   'src/screens/ReadingListScreen.tsx',
