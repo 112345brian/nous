@@ -2,7 +2,7 @@
 //
 // Pure bookkeeping: the clock and the log sink are injected, so this module
 // does no I/O of its own and is trivially testable. Only the default `perf`
-// instance at the bottom touches globals (`__DEV__`, `performance`, `console`).
+// instance (src/services/perf.ts) touches globals (`__DEV__`, `performance`, `console`).
 //
 // Usage (all calls are no-ops, and `time` just runs `fn`, when disabled):
 //   perf.begin(slug);
@@ -99,18 +99,3 @@ export function createPerf(opts: PerfOptions): Perf {
     },
   };
 }
-
-declare const __DEV__: boolean | undefined;
-declare const performance: { now(): number } | undefined;
-
-const clock: () => number =
-  typeof performance !== 'undefined' && typeof performance.now === 'function'
-    ? () => performance.now()
-    : () => Date.now();
-
-/** Default instance: on only in dev builds (`__DEV__`), silent in release. */
-export const perf: Perf = createPerf({
-  enabled: typeof __DEV__ !== 'undefined' && !!__DEV__,
-  now: clock,
-  log: line => console.log(line),
-});

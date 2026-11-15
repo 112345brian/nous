@@ -18,7 +18,7 @@ import {
 } from '../services/db';
 import { makeExcerpt } from '../utils/excerpt';
 import { fetchAndCacheArticle, ensureNotesCached, onMathReady } from '../services/catalog';
-import { perf } from '../utils/perf';
+import { perf } from '../services/perf';
 import { startPrefetch } from '../services/prefetch';
 import { primeBackfillForSlugs, primeGraphLayouts } from '../services/inpho';
 import { idleScheduler } from '../services/idleScheduler';

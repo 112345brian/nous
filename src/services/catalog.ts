@@ -7,7 +7,7 @@ import { mathHash } from '../utils/mathHash';
 import { refreshIndexIfStale as refreshIndexUseCase } from '../core/refreshIndex';
 import type { IndexEntry } from '../types';
 import { extractById, extractMetaContent, extractTitle, extractAuthor, decodeEntities } from '../utils/sepPage';
-import { perf } from '../utils/perf';
+import { perf } from './perf';
 
 // Replace all \(…\) and \[…\] TeX math in the raw HTML with compact <math-i>
 // placeholder elements. SVGs are stored in the `math` DB table by hash so
