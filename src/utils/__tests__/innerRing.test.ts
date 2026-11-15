@@ -1,15 +1,18 @@
 // Enforces the architecture rule: the INNER RING does no I/O.
 //
 // Rings
-//   inner (pure):  src/types.ts, src/data/**, src/utils/**
+//   inner (pure):  src/types.ts, src/data/**, src/utils/**, src/core/**
+//                  src/core holds the ports (interfaces) and the use cases that take them as
+//                  parameters; adapters in src/services implement the ports, never the reverse.
 //   outer (I/O):   src/services/**, src/screens/**, src/components/**, src/tests/**, App.tsx
 //   UI render:     src/utils/sepHtml/render/** is React Native UI code that happens to live
 //                  under utils/. It is an OUTER-ring directory, so it is not scanned here,
 //                  and inner-ring files must not import it.
 //
-// An inner-ring file must not: import from an outer-ring directory, import any package
-// other than the allowlist, load modules dynamically (require / import()), or call
-// I/O, timer or clock APIs. Files are parsed with the TypeScript compiler, so strings,
+// An inner-ring file must not: import from an outer-ring directory (so no concrete adapter
+// such as services/db, expo-sqlite, expo-file-system), import any package other than the
+// allowlist, load modules dynamically (require / import()), call I/O, timer or clock APIs,
+// read process.env, or keep module-level mutable state (a hidden singleton). Files are parsed with the TypeScript compiler, so strings,
 // comments and regexes (e.g. the JS-in-a-string constants in injectedAssets.ts) never
 // cause false positives. Everything flows through scanSource(), which is self-tested below.
 import ts from 'typescript';
@@ -37,6 +40,13 @@ const FORBIDDEN_MEMBERS = new Set(['Date.now', 'performance.now', 'Math.random']
 
 export interface Violation { file: string; line: number; what: string }
 
+// Recorded, reasoned exceptions. Each must still match a real violation, or the test below
+// fails, so an exception cannot outlive the code it excuses.
+const KNOWN_EXCEPTIONS: Array<{ file: string; what: string; reason: string }> = [
+  { file: 'src/utils/linkifier.ts', what: 'module-level mutable binding "_default"',
+    reason: 'lazy default instance over the bundled link index; move to src/services after catalog.ts settles' },
+];
+
 export function scanSource(file: string, text: string): Violation[] {
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const out: Violation[] = [];
@@ -54,7 +64,24 @@ export function scanSource(file: string, text: string): Violation[] {
     }
   };
 
+  // Hidden singletons: top-level `let`/`var`, or a top-level `new Map/Set/WeakMap/WeakSet`.
+  for (const st of sf.statements) {
+    if (!ts.isVariableStatement(st)) continue;
+    const isConst = (st.declarationList.flags & ts.NodeFlags.Const) !== 0;
+    for (const d of st.declarationList.declarations) {
+      if (!isConst) add(d, `module-level mutable binding "${d.name.getText(sf)}"`);
+      else if (d.initializer && ts.isNewExpression(d.initializer) && ts.isIdentifier(d.initializer.expression)
+        && ['Map', 'Set', 'WeakMap', 'WeakSet'].includes(d.initializer.expression.text)
+        && (d.initializer.arguments?.length ?? 0) === 0) {  // an empty one is a cache; a seeded one is a constant table
+        add(d, `module-level ${d.initializer.expression.text} "${d.name.getText(sf)}" is hidden shared state`);
+      }
+    }
+  }
+
   const visit = (n: ts.Node): void => {
+    if (ts.isPropertyAccessExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'process') {
+      add(n, 'reads process.* (pass the environment in)');
+    }
     if ((ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier && ts.isStringLiteral(n.moduleSpecifier)) {
       checkSpecifier(n, n.moduleSpecifier.text);
     }
@@ -64,6 +91,7 @@ export function scanSource(file: string, text: string): Violation[] {
       if (e.kind === ts.SyntaxKind.ImportKeyword) add(n, 'dynamic import()');
       else if (ts.isIdentifier(e) && e.text === 'require') add(n, 'require()');
       else if (ts.isIdentifier(e) && FORBIDDEN_CALLS.has(e.text)) add(n, `calls ${e.text}()`);
+      else if (ts.isIdentifier(e) && e.text === 'Date') add(n, 'Date() reads the clock');
       else if (ts.isPropertyAccessExpression(e)) {
         const name = `${e.expression.getText(sf)}.${e.name.text}`;
         if (FORBIDDEN_MEMBERS.has(name)) add(n, `calls ${name}()`);
@@ -97,6 +125,7 @@ export function innerRingFiles(): string[] {
   };
   walk('src/utils');
   walk('src/data');
+  walk('src/core');
   return files;
 }
 
@@ -106,7 +135,8 @@ describe('inner ring has no I/O', () => {
   test('the ring is non-trivial (guards against a silently empty scan)', () => {
     expect(files.length).toBeGreaterThanOrEqual(15);
     for (const f of ['src/types.ts', 'src/utils/forceLayout.ts', 'src/utils/linkifier.ts', 'src/utils/sepHtml/parse.ts',
-      'src/utils/sepPage.ts', 'src/utils/citation.ts', 'src/utils/contentHash.ts', 'src/utils/mathHash.ts']) {
+      'src/utils/sepPage.ts', 'src/utils/citation.ts', 'src/utils/contentHash.ts', 'src/utils/mathHash.ts',
+      'src/core/ports.ts', 'src/core/syncUserData.ts', 'src/core/zotero.ts', 'src/utils/syncPath.ts']) {
       expect(files).toContain(f);
     }
     expect(files).not.toContain('src/utils/sepHtml/render/Blocks.tsx');
@@ -114,7 +144,26 @@ describe('inner ring has no I/O', () => {
 
   test('no inner-ring file imports outer-ring code or does I/O', () => {
     const violations = files.flatMap(f => scanSource(f, fs.readFileSync(path.join(ROOT, f), 'utf8')));
-    expect(violations.map(v => `${v.file}:${v.line} ${v.what}`)).toEqual([]);
+    const unexcused = violations.filter(v => !KNOWN_EXCEPTIONS.some(x => x.file === v.file && x.what === v.what));
+    expect(unexcused.map(v => `${v.file}:${v.line} ${v.what}`)).toEqual([]);
+  });
+
+  test('every recorded exception still matches a real violation (none are stale)', () => {
+    for (const x of KNOWN_EXCEPTIONS) {
+      const hits = scanSource(x.file, fs.readFileSync(path.join(ROOT, x.file), 'utf8'));
+      expect({ exception: x.file, stillViolates: hits.some(v => v.what === x.what) }).toEqual({ exception: x.file, stillViolates: true });
+      expect(x.reason.length).toBeGreaterThan(10);
+    }
+  });
+});
+
+describe('ports are plain interfaces', () => {
+  test('src/core/ports.ts declares only types: no values, no functions, no classes', () => {
+    const text = fs.readFileSync(path.join(ROOT, 'src/core/ports.ts'), 'utf8');
+    const sf = ts.createSourceFile('ports.ts', text, ts.ScriptTarget.Latest, true);
+    const bad = sf.statements.filter(st => !(ts.isInterfaceDeclaration(st) || ts.isTypeAliasDeclaration(st)
+      || (ts.isImportDeclaration(st) && st.importClause?.isTypeOnly)));
+    expect(bad.map(st => st.getText(sf).slice(0, 60))).toEqual([]);
   });
 });
 
@@ -145,6 +194,29 @@ describe('scanSource (the check itself)', () => {
     expect(run(`const r = Math.random();`)).toEqual(['calls Math.random()']);
     expect(run(`new XMLHttpRequest();`)).toEqual(['new XMLHttpRequest()']);
     expect(run(`globalThis.fetch('x');`)).toHaveLength(1);
+  });
+  test('core files may not import concrete adapters', () => {
+    const core = (src: string) => scanSource('src/core/x.ts', src).map(v => v.what);
+    expect(core(`import { getDb } from '../services/db';`)).toHaveLength(1);
+    expect(core(`import * as SQLite from 'expo-sqlite';`)).toHaveLength(1);
+    expect(core(`import { File } from 'expo-file-system';`)).toHaveLength(1);
+    expect(core(`import { Platform } from 'react-native';`)).toHaveLength(1);
+    expect(core(`import type { Clock } from './ports';`)).toEqual([]);
+    expect(core(`import type { Annotation } from '../types';`)).toEqual([]);
+  });
+  test('flags process.env, Date(), and hidden module-level state', () => {
+    expect(run(`const h = process.env.HOME;`)).toHaveLength(1);
+    expect(run(`const s = Date();`)).toEqual(['Date() reads the clock']);
+    expect(run(`let _db = null;`)).toEqual(['module-level mutable binding "_db"']);
+    expect(run(`var cache = 1;`)).toHaveLength(1);
+    expect(run(`const m = new Map<string, string>();`)).toHaveLength(1);
+    expect(run(`export const S = new Set<string>();`)).toHaveLength(1);
+    expect(run(`const T = new Set(['a', 'b']);`)).toEqual([]);  // seeded constant table
+  });
+  test('allows constants, local state and non-clock Date use', () => {
+    expect(run(`const TABLE = { a: 1 }; const L = [1, 2];`)).toEqual([]);
+    expect(run(`export function f() { let n = 0; const m = new Map(); return n + m.size; }`)).toEqual([]);
+    expect(run(`const iso = new Date(1700000000000).toISOString();`)).toEqual([]);
   });
   test('allows pure code, sibling/inner imports, the allowlisted package, and explicit dates', () => {
     expect(run(`import { parseDocument } from 'htmlparser2';`)).toEqual([]);
