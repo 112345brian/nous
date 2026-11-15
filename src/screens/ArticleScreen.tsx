@@ -17,7 +17,7 @@ import {
   getMeta, setReadProgress, getLinksTo, indexLinks, getRecentSlugs, getMathSvgMap,
 } from '../services/db';
 import { makeExcerpt } from '../utils/excerpt';
-import { fetchAndCacheArticle, ensureNotesCached } from '../services/catalog';
+import { fetchAndCacheArticle, ensureNotesCached, onMathReady } from '../services/catalog';
 import { perf } from '../utils/perf';
 import { primeBackfillForSlugs, primeGraphLayouts } from '../services/inpho';
 import { idleScheduler } from '../services/idleScheduler';
@@ -268,6 +268,21 @@ export default function ArticleScreen() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [astKey]);
+
+  // Equations are rendered after the text is shown (see fetchAndCacheArticle).
+  // When this article's math lands, swap in the rewritten AST; the mathSvgs
+  // effect above then loads the SVGs. Only the native AST is replaced, so the
+  // reader keeps their place and state.entry (and its content hash) is untouched.
+  useEffect(() => {
+    if (!USE_NATIVE_RENDERER) return;
+    return onMathReady(async (readySlug) => {
+      if (readySlug !== slug) return;
+      try {
+        const e = await getEntry(slug);
+        if (e?.content_ast) setNativeArticle(JSON.parse(e.content_ast));
+      } catch { /* keep showing the text-only version */ }
+    });
+  }, [slug]);
 
   // Resolve footnote text from notes.html. Uses the stored notes_html when
   // present; otherwise lazily fetches + persists it (for articles cached before
