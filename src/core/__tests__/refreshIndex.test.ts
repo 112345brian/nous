@@ -53,6 +53,26 @@ describe('refreshIndexIfStale with fakes', () => {
     expect(later.meta.get('index_refreshed_at')).toBe(String(NOW + INDEX_REFRESH_INTERVAL_MS));
   });
 
+  test.each(['abc', 'NaN', 'Infinity', '-5'])('an unusable timestamp %j is stale', async bad => {
+    const w = world({ last: bad, count: 3 });
+    await refreshIndexIfStale(w.deps);
+    expect(w.log[0]).toBe('fetch');
+    expect(w.meta.get('index_refreshed_at')).toBe(String(NOW));
+  });
+
+  test('an empty stored timestamp is stale; future and recent ones are fresh', async () => {
+    const empty = world({ count: 3 });
+    empty.meta.set('index_refreshed_at', '');
+    await refreshIndexIfStale(empty.deps);
+    expect(empty.log[0]).toBe('fetch');
+
+    for (const ts of [NOW + 3600_000, NOW - 1000]) {
+      const w = world({ last: String(ts), count: 3 });
+      await refreshIndexIfStale(w.deps);
+      expect(w.log).toEqual([]);
+    }
+  });
+
   test('parsed entries come from the injected source, sorted by title', async () => {
     const w = world();
     await refreshIndexIfStale(w.deps);

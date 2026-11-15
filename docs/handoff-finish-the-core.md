@@ -58,5 +58,5 @@ Done on `claude/core-handoff-docs-0904e3` (cut from `main`, then merged `claude/
 5. The script copies of the page helpers stay (plain node cannot import TS) but
    `src/utils/__tests__/scriptHelpersDrift.test.ts` now fails if one drifts.
 
-Still open (small): a non-numeric `index_refreshed_at` counts as fresh forever; `~` expansion of the
-sync folder needs a device check (both in audit section 7).
+Still open (small): `~` expansion of the sync folder needs a device check (audit section 7). The
+non-numeric `index_refreshed_at` bug is fixed: a non-finite timestamp now counts as stale.

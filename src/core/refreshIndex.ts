@@ -21,8 +21,12 @@ export async function refreshIndexIfStale(deps: RefreshIndexDeps): Promise<void>
   const { source, store, meta, clock } = deps;
   const lastRefresh = await meta.getMeta('index_refreshed_at');
   const count = await store.getEntryCount();
+  const refreshedAt = Number(lastRefresh);
+  // A stored value that is not a finite number (corrupt, 'abc', 'Infinity') counts as stale:
+  // `now - NaN > interval` is false and would otherwise keep the index "fresh" forever.
   const isStale = !lastRefresh ||
-    clock.now() - Number(lastRefresh) > INDEX_REFRESH_INTERVAL_MS ||
+    !Number.isFinite(refreshedAt) ||
+    clock.now() - refreshedAt > INDEX_REFRESH_INTERVAL_MS ||
     count === 0;
 
   if (!isStale) return;

@@ -86,9 +86,22 @@ describe('is the index stale?', () => {
     await refreshIndexIfStale();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
-  test('quirk: a non-numeric timestamp counts as fresh (NaN comparison is false)', async () => {
-    setup({ lastRefresh: 'abc', count: 5 });
+  test.each(['abc', '', 'NaN', 'Infinity', '-Infinity'])('an unusable timestamp %j counts as stale', async bad => {
+    setup({ lastRefresh: bad, count: 5 });
     await refreshIndexIfStale();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(m.setMeta).toHaveBeenCalledWith('index_refreshed_at', String(NOW));
+  });
+  test('a negative timestamp is stale; a future one and a recent one stay fresh', async () => {
+    setup({ lastRefresh: '-5', count: 5 });
+    await refreshIndexIfStale();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    fetchMock.mockClear();
+    for (const ts of [NOW + 3600_000, NOW - 1000]) {
+      setup({ lastRefresh: String(ts), count: 5 });
+      await refreshIndexIfStale();
+    }
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

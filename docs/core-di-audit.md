@@ -214,8 +214,10 @@ Verified against the code. Please fold these into the draft.
   The seed has no `parent_label`, so until then the browse list has no parent grouping and
   the link index is built from seed titles only. The time is no longer stamped when the
   entries came from the seed, so the next launch fetches the real index.
-- **Suspected, not fixed (pinned):** a non-numeric `index_refreshed_at` value is treated as
-  fresh forever (`now - NaN > interval` is false), unless the library is empty.
+- **Fixed (test flipped in `refreshIndex.test.ts`, new cases in `core/__tests__/refreshIndex.test.ts`):**
+  a non-numeric `index_refreshed_at` value was treated as fresh forever (`now - NaN > interval`
+  is false), unless the library was empty. A value that is not a finite number now counts as
+  stale; negative values were already stale, and future or recent timestamps stay fresh.
 - **Fixed (new test in `fetchAndCache.test.ts`):** the 30 s abort timer in the article request is
   cleared as soon as the response headers arrive (`finally { clearTimeout }`), before the body
   is read. A connection that stalls mid-body is therefore never aborted, and the call (and the
@@ -278,9 +280,8 @@ tests that fake the module wrap their fake in `helpers/mockDbModule.ts`.
   fails when one drifts (it found, and the change fixed, a `test-download.mjs` copy that did not
   decode numeric or named entities).
 - `origin/new-spinner`, an older unrelated UI feature (an animated logo), was not merged.
-- Still open from section 7: a non-numeric `index_refreshed_at` is treated as fresh forever, and
-  the `~` sync-folder expansion needs a device check. The four bugs the earlier pass left pinned
-  are fixed (see section 7).
+- Still open from section 7: the `~` sync-folder expansion needs a device check. The bugs the
+  earlier pass left pinned, including the non-numeric `index_refreshed_at`, are fixed (see section 7).
 
 ### What the parent's new code added to the picture
 
