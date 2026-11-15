@@ -99,3 +99,12 @@ export interface LibraryIndexStore {
   /** Drop any in-memory copy of the link index so the next reader sees the new one. */
   invalidateLinkCache(): void;
 }
+
+/** The slice of the local library the math-completion pipeline reads and rewrites. */
+export interface ArticleMathStore {
+  /** The cached article body, or null when it is not in the library. */
+  getEntryHtml(slug: string): Promise<string | null>;
+  updateArticleHtml(slug: string, html: string): Promise<void>;
+  /** The article's pre-parsed AST as JSON. */
+  setArticleAst(slug: string, ast: string): Promise<void>;
+}

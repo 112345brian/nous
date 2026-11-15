@@ -6,6 +6,7 @@ import { parseSepHtml } from '../utils/sepHtml/parse';
 import { mathHash } from '../utils/mathHash';
 import { refreshIndexIfStale as refreshIndexUseCase } from '../core/refreshIndex';
 import { fetchAndCacheArticle as cacheArticleUseCase, type CacheArticleDeps } from '../core/cacheArticle';
+import { createMathCompletion } from '../core/mathCompletion';
 import type { IndexEntry } from '../types';
 import { extractById, decodeEntities } from '../utils/sepPage';
 import { perf } from './perf';
@@ -54,87 +55,18 @@ async function substitutemath(html: string): Promise<string> {
 }
 
 // ── Deferred math ────────────────────────────────────────────────────────────
-// A freshly fetched article is cached and shown with its raw TeX first (the
-// parser renders it as monospace); equations are rendered afterwards and the
-// article is rewritten with <math-i> hash references. Slugs whose math is not
-// done yet are tracked in a meta key so an interrupted run resumes at launch
-// (see resumePendingMath, called from backfillMathInline).
-const MATH_PENDING_KEY = 'math_pending';
-let pendingChain: Promise<void> = Promise.resolve();
-function updatePending(fn: (slugs: Set<string>) => void): Promise<void> {
-  // Serialized: read-modify-write on one meta row must not interleave.
-  pendingChain = pendingChain.then(async () => {
-    try {
-      const raw = await getMeta(MATH_PENDING_KEY);
-      const slugs = new Set<string>(raw ? JSON.parse(raw) : []);
-      fn(slugs);
-      await setMeta(MATH_PENDING_KEY, JSON.stringify([...slugs]));
-    } catch {
-      // non-fatal — worst case the slug is not retried until it is re-fetched
-    }
-  });
-  return pendingChain;
-}
-
-type MathReadyListener = (slug: string) => void;
-const mathReadyListeners = new Set<MathReadyListener>();
-// Subscribe to "this article's equations are now rendered and stored".
-// Returns an unsubscribe function.
-export function onMathReady(cb: MathReadyListener): () => void {
-  mathReadyListeners.add(cb);
-  return () => { mathReadyListeners.delete(cb); };
-}
-
-const mathInFlight = new Map<string, Promise<boolean>>();
-// Render the equations of a cached article and rewrite it with SVG references.
-// `html` may be passed when the caller already holds it (skips a DB read).
-// Resolves true when the article no longer needs math work; false when the
-// renderer made no progress (it stays pending and is retried at next launch).
-export function completeArticleMath(slug: string, html?: string): Promise<boolean> {
-  const existing = mathInFlight.get(slug);
-  if (existing) return existing;
-  const p = (async () => {
-    try {
-      const src = html ?? (await getEntryHtml(slug));
-      if (!src) return false;
-      const updated = await substitutemath(src);
-      if (updated === src) {
-        // Nothing converted. Fine if there was no TeX; otherwise the renderer
-        // timed out — keep it pending.
-        MATH_SUBST_RE.lastIndex = 0;
-        if (MATH_SUBST_RE.test(src)) return false;
-      } else {
-        await updateArticleHtml(slug, updated);
-        await setArticleAst(slug, JSON.stringify(parseSepHtml(updated)));
-      }
-      await updatePending(s => { s.delete(slug); });
-      mathReadyListeners.forEach(cb => { try { cb(slug); } catch { /* listener bug must not break the pipeline */ } });
-      return true;
-    } catch {
-      return false;
-    } finally {
-      mathInFlight.delete(slug);
-    }
-  })();
-  mathInFlight.set(slug, p);
-  return p;
-}
-
-// Finish math for articles whose deferred render never completed (app killed,
-// renderer timed out). Sequential, yielding between articles.
-export async function resumePendingMath(): Promise<void> {
-  let slugs: string[] = [];
-  try {
-    const raw = await getMeta(MATH_PENDING_KEY);
-    slugs = raw ? JSON.parse(raw) : [];
-  } catch {
-    return;
-  }
-  for (const slug of slugs) {
-    await new Promise<void>(r => setTimeout(r, 32));
-    await completeArticleMath(slug);
-  }
-}
+// The deferred-math completion pipeline lives in src/core/mathCompletion.ts (see its header
+// for the flow). This is the one instance the app uses, wired to SQLite and the renderer.
+// `substitutemath` stays here: it is the renderer and equation-store adapter.
+const mathCompletion = createMathCompletion({
+  substitute: substitutemath,
+  articles: { getEntryHtml, updateArticleHtml, setArticleAst },
+  meta: { getMeta, setMeta },
+  sleep: ms => new Promise<void>(r => setTimeout(r, ms)),
+});
+export const onMathReady = mathCompletion.onMathReady;
+export const completeArticleMath = mathCompletion.completeArticleMath;
+export const resumePendingMath = mathCompletion.resumePendingMath;
 
 // One-time migration: rewrite articles that have the old inline-base64 format
 // (<math-i>BASE64</math-i>) to the new hash-reference format. Extracts the SVG
@@ -323,7 +255,7 @@ function articleDeps(): CacheArticleDeps {
   return {
     source: { fetchArticleHtml, fetchNotesHtml },
     library: { cacheArticle, indexLinks },
-    math: { substitute: substitutemath, completeLater },
+    math: { substitute: substitutemath, completeLater: mathCompletion.completeLater },
     timing: perf,
     linkify: linkifyHtml,
   };
@@ -341,12 +273,6 @@ async function fetchArticleHtml(slug: string): Promise<string | null> {
   }
   if (!res.ok) return null;
   return perf.time(slug, 'fetch-body', () => res.text());
-}
-
-// Record the debt first so a kill mid-render resumes at next launch, then render.
-// Errors stay inside updatePending / completeArticleMath.
-function completeLater(slug: string, html: string): void {
-  updatePending(s => { s.add(slug); }).then(() => completeArticleMath(slug, html));
 }
 
 async function fetchIndexHtml(): Promise<string> {

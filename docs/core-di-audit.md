@@ -30,7 +30,7 @@ because they leak state or globals into the logic that calls them.
 |---|---|---|---|---|---|
 | `services/dataSync.ts` | none | `expo-file-system`, `react-native` `Platform`, `fetch`, `db` | `Date` (Zotero "today"), `process.env.HOME` | `SyncFolder`, `UserDataStore`, `ZoteroHttp`, `Clock` | **Converted** (see section 4) |
 | `utils/linkifier.ts` | `_default` (lazy cache of the compiled link index) | none (bundled data module only) | none | the index as a parameter | **Converted**: `createLinkifier(json)`; the lazy default is the one recorded exception |
-| `services/catalog.ts` | after the perf merge: `pendingChain`, `mathReadyListeners`, `mathInFlight` (the deferred-math completion subsystem) | `./db` (about 20 functions), `./mathRender`, bundled `assets/entry-seed.json`, `fetch` x3 (index page, article page, notes page), `./perf` | `Date.now`, `setTimeout` (throttle sleeps, the 30 s abort), `AbortController` | `ArticleSource`, `ArticleLibrary`, `ArticleMath`, `KeyValueStore`, `LibraryIndexStore`, `StageTimer`, `Clock`, `Sleep` | `refreshIndexIfStale` and `fetchAndCacheArticle` **converted** (section 4); the rest is listed (section 5) |
+| `services/catalog.ts` | none left in the converted flows; `MATH_SUBST_RE` (a global-flag regex, so `lastIndex` state) remains for `substitutemath` | `./db` (about 20 functions), `./mathRender`, bundled `assets/entry-seed.json`, `fetch` x3 (index page, article page, notes page), `./perf` | `Date.now`, `setTimeout` (throttle sleeps, the 30 s abort), `AbortController` | `ArticleSource`, `ArticleLibrary`, `ArticleMath`, `ArticleMathStore`, `KeyValueStore`, `LibraryIndexStore`, `StageTimer`, `Clock`, `Sleep` | `refreshIndexIfStale`, `fetchAndCacheArticle` and the math-completion state machine **converted** (section 4); `substitutemath`, the backfills, downloads and sync are listed (section 5) |
 | `services/db.ts` | `_db` (connection), `metaCache`, `_linkCache` | `expo-sqlite` | `Date.now` x7 | it **is** the `LibraryStore` / `UserStore` / `KeyValueStore` adapter; nothing to inject into it | Listed; 4 sessions editing it |
 | `services/graphDb.ts` | `_schema` (creates its own tables lazily) | `getDb()` x4 from `./db` | `Date.now` x4 | `GraphStore` adapter; the graph assembly (nodes/edges from rows) is pure and could move inward | Listed |
 | `services/inpho.ts` | `_primedSlugs` (Set) | `fetch` (`getJson`), `expo-file-system` (dev-seed files, `__DEV__` only), `getMeta/setMeta` from `./db` | `Date.now` x2, `setTimeout` x1 | `GraphSource`, `KeyValueStore`, `Clock`, `Sleep` | Listed |
@@ -79,13 +79,16 @@ All conversions keep the old exported function names and signatures, so no calle
 | Link index (UC-C1 step) | `linkifyHtml` hard-wired to the bundled JSON | `createLinkifier(json)` is pure and testable with a tiny index; `linkifyHtml` is the lazy default |
 | Index refresh (UC-A3) | `catalog.refreshIndexIfStale` called `Date.now`, `fetch`, `./db` and the bundled seed directly | `core/refreshIndex.ts` takes `ArticleSource`, `LibraryIndexStore`, `KeyValueStore`, `Clock` and the bundled entries as a parameter; the contents-page parser and the link-index payload are pure (`utils/sepIndex.ts`); `catalog.refreshIndexIfStale()` is a wrapper with the same name, so `App.tsx` and `syncCachedArticles` are unchanged |
 | Article caching (UC-C1, C7) | `catalog.fetchAndCacheArticle` called `fetch`, `AbortController`, `./db`, the math pipeline, `perf` and `linkifyHtml` directly | `core/cacheArticle.ts` takes `ArticleSource`, `ArticleLibrary`, `ArticleMath`, `StageTimer` and a `linkify` function; page extraction, header stripping and the TeX/footnote checks are pure (`utils/sepArticlePage.ts`); `catalog.fetchAndCacheArticle(slug, opts)` is a wrapper, and the 30 s abort plus the `fetch`/`fetch-body` timing stay in a small adapter beside it, so callers (`ArticleScreen`, `prefetch`, `downloadAll`, `syncCachedArticles`, `runTests`) are unchanged |
+| Deferred-math completion (UC-C6) | `catalog.ts` held `pendingChain`, `mathReadyListeners` and `mathInFlight` as module-level singletons, plus the read-modify-write on `math_pending` | `core/mathCompletion.ts`: `createMathCompletion({ substitute, articles, meta, sleep })` keeps all state in a closure; `catalog.ts` creates the one app instance and re-exports `onMathReady`, `completeArticleMath` and `resumePendingMath` under the same names, so `ArticleScreen` and `backfillMathInline` are unchanged. `substitutemath` is deliberately **not** moved (see section 5) and is injected. The "is TeX left?" check is the pure, stateless `utils/sepMath.hasTexSpan` |
 
 Evidence: `src/services/__tests__/dataSync.test.ts` (14 tests, written before the change
 against the old code and **unchanged** afterwards), the linkifier snapshots (taken from
 the old code), plus new tests that run the core with plain in-memory fakes and make
 `Date.now` and `fetch` throw, to prove the core never reaches for them:
 `src/core/__tests__/*.test.ts`, `src/utils/__tests__/syncPath.test.ts`,
-`src/utils/__tests__/linkifier.test.ts`, `src/utils/__tests__/sepIndex.test.ts`. The article-caching
+`src/utils/__tests__/linkifier.test.ts`, `src/utils/__tests__/sepIndex.test.ts`. The math-completion tests
+(`src/services/__tests__/mathCompletion.test.ts`, 13 tests) were written against the old state machine and are
+unchanged after the move; disabling the in-flight de-duplication is caught by 2 of them plus the perf session's. The article-caching
 wrapper tests (`src/services/__tests__/fetchAndCache.test.ts`, 16 tests) and the perf session's
 `deferredMath.test.ts` (9 tests, the math modes) were run against the old code first and are
 unchanged after the move; a deliberate mutation of the defer rule is caught by 2 of them. The index-refresh
@@ -109,13 +112,15 @@ only after the performance and db sessions have merged, to avoid conflicts.
    `ArticleSource.fetchArticleHtml`/`fetchNotesHtml`, `ArticleLibrary`, `ArticleMath` and
    `StageTimer`. `fetchNotesHtml` is passed through as it is (network plus a small
    extraction in one function); splitting those is a follow-up.
-2b. **The deferred-math subsystem in `catalog.ts`** (added by the progressive-math work):
-   `completeArticleMath`, `updatePending`, `resumePendingMath`, `onMathReady`,
-   `substitutemath`, with three module-level singletons. Today `ArticleMath` is an
-   adapter over it. Moving it behind real ports needs a `MathRenderer` (the WebView
-   bridge), a `MathStore` (`putMathBatch`, article rewrite) and a pending-set store
-   (`KeyValueStore`), and makes `onMathReady` an injected event source instead of a module
-   global. This is the largest remaining hidden-state cluster in `catalog.ts`.
+2b. ~~The deferred-math completion state machine~~: **done**, see section 4. What is left of
+   the subsystem is `substitutemath` (render the equations, store the SVGs, rewrite the
+   HTML) and its renderer: it needs a `MathRenderer` (the WebView bridge in `mathRender.ts`,
+   six module variables) and a `MathStore` (`putMathBatch`). **Blocked on the `tiered-math`
+   branch**, which rewrites `substitutemath` (it renders trivially simple TeX as styled text
+   and adds `utils/mathTier.ts`). Converting it now would turn that branch's change into a
+   delete-versus-modify conflict, so it was left in place and injected. Do it right after
+   `tiered-math` merges. `backfillMathHashFormat` and `backfillMathInline` belong with it
+   (the second calls `resumePendingMath`); `delete-legacy-compat` may remove them first.
 3. **`catalog.downloadAll` / `syncCachedArticles` / backfills** (UC-G1, G2, A4). Already
    inject progress and cancellation; the rest is `LibraryStore`, `Sleep`, `Clock`.
    Overlaps the idle-scheduler work (`Scheduler`).
@@ -188,7 +193,9 @@ Verified against the code. Please fold these into the draft.
    `fetchNotesHtml`), and the draft's `MathRenderer` is really three things: the renderer
    (WebView bridge), the equation store, and the deferred-completion pipeline. The use case
    only sees the last one, as `ArticleMath { substitute, completeLater }`.
-10. `@react-native-community/netinfo` is a dependency but nothing in `src` imports it. The
+10. `ArticleMathStore` (`getEntryHtml`, `updateArticleHtml`, `setArticleAst`) is new and separate
+    from the draft's `LibraryStore`: the math pipeline rewrites articles but never creates them.
+11. `@react-native-community/netinfo` is a dependency but nothing in `src` imports it. The
    prefetch work that wants a "skip when offline" check will need a `Connectivity` port.
 
 ## 7. Latent bugs found while doing this (not fixed unless noted)
@@ -216,6 +223,13 @@ Verified against the code. Please fold these into the draft.
   article screen waiting on it) can hang. Probable fix: keep the timer until `res.text()` has
   resolved. Pinned by `fetchAndCache.test.ts` ("the timeout timer is cleared once the response
   arrives").
+- **Hazard removed:** `completeArticleMath` and `substitutemath` shared one global-flag regex
+  (`MATH_SUBST_RE`) and each had to reset `lastIndex = 0` before use; forgetting that in
+  either makes `test`/`exec` skip matches. The completion side now uses the stateless
+  `hasTexSpan`; `substitutemath` still has the shared regex until it is converted.
+- **Behaviour to know (pinned):** `completeArticleMath(slug, html)` returns the in-flight
+  promise for that slug even if called with a different `html`, and a completion that finds no
+  TeX left in an unchanged article counts as done and notifies listeners.
 - **Dead work removed:** `fetchAndCacheArticle` computed `extractTitle(html)` and never used it
   (the title comes from the index). The conversion drops it, which also clears one lint error.
 - `scripts/test-download.mjs`, `scripts/buildEntrySeed.js` and `scripts/auditCorpus.cjs`
