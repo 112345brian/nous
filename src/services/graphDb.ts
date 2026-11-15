@@ -10,6 +10,7 @@
 
 import type * as SQLite from 'expo-sqlite';
 import { getDb } from './db';
+import { addColumnIfMissing, runMigrations, tableVersionStore, type Migration } from './migrations';
 import { getInfluenceWeight } from '../data/influenceWeights';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -41,10 +42,17 @@ export type GraphView = 'links' | GraphMode;
 
 // ── Schema (owned here, created on first use) ────────────────────────────────
 
-let _schema: Promise<void> | null = null;
-
-async function ensureGraphSchema(db: SQLite.SQLiteDatabase): Promise<void> {
-  await db.execAsync(`
+// Schema version lives in the shared schema_versions table under this scope
+// (the core schema owns PRAGMA user_version). See services/migrations.ts.
+const GRAPH_MIGRATIONS: readonly Migration[] = [
+  {
+    // Everything that existed before graph schema versioning. Adopts installs
+    // whose tables predate the date columns: only a duplicate-column error is
+    // ignored when adding them.
+    version: 1,
+    name: 'InPhO tables and layout cache',
+    async up(db) {
+      await db.execAsync(`
     -- InPhO semantic index (ideas + thinkers), synced per-client from
     -- inphoproject.org. sep_dir joins to entries.slug. See services/inpho.ts.
     CREATE TABLE IF NOT EXISTS inpho_nodes (
@@ -79,19 +87,29 @@ async function ensureGraphSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       PRIMARY KEY (center_slug, mode)
     );
   `);
-  // Upgrade indexes created before the date columns existed (idempotent).
-  await Promise.all([
-    db.runAsync('ALTER TABLE inpho_nodes ADD COLUMN birth_year INTEGER').catch(() => {}),
-    db.runAsync('ALTER TABLE inpho_nodes ADD COLUMN death_year INTEGER').catch(() => {}),
-    db.runAsync('ALTER TABLE inpho_nodes ADD COLUMN dates_checked INTEGER NOT NULL DEFAULT 0').catch(() => {}),
-  ]);
-}
+      await addColumnIfMissing(db, 'inpho_nodes', 'birth_year INTEGER');
+      await addColumnIfMissing(db, 'inpho_nodes', 'death_year INTEGER');
+      await addColumnIfMissing(db, 'inpho_nodes', 'dates_checked INTEGER NOT NULL DEFAULT 0');
+    },
+  },
+];
+
+// Keyed by connection handle, not module-wide: when the database is closed and
+// reopened (e.g. the file was replaced by a seed import) the new handle must
+// be checked again, or the tables would be missing from the new file.
+const _schemaByDb = new WeakMap<SQLite.SQLiteDatabase, Promise<void>>();
 
 // Shared DB handle with the InPhO schema guaranteed present.
 async function gdb(): Promise<SQLite.SQLiteDatabase> {
   const db = await getDb();
-  if (!_schema) _schema = ensureGraphSchema(db).catch(e => { _schema = null; throw e; });
-  await _schema;
+  let ready = _schemaByDb.get(db);
+  if (!ready) {
+    ready = runMigrations(db, GRAPH_MIGRATIONS, tableVersionStore('graph')).then(() => undefined);
+    _schemaByDb.set(db, ready);
+    // A failed migration is not cached: the next call retries it.
+    ready.catch(() => { if (_schemaByDb.get(db) === ready) _schemaByDb.delete(db); });
+  }
+  await ready;
   return db;
 }
 
