@@ -5,7 +5,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Annotation } from '../types';
 import { parseToc } from '../utils/parseToc';
-import { colors, roleMap } from '../theme/tokens';
+import { roleMap } from '../theme/tokens';
 
 // ── Design tokens ──────────────────────────────────────────────────────────
 const C = roleMap({

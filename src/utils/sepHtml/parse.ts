@@ -16,9 +16,6 @@ const BLOCK_TAGS = new Set([
   'blockquote', 'dl', 'table', 'hr', 'img', 'div', 'section',
 ]);
 
-// Container divs we descend into rather than render. SEP wraps the real article
-// in <div id="main-text"> and nests #preamble / #toc / #pubinfo as siblings.
-const TRANSPARENT_IDS = new Set(['main-text', 'aueditable', 'article-content']);
 // Sibling sections inside the body we skip — they're rendered as native chrome
 // elsewhere (the screen renders preamble/toc/title itself).
 const SKIP_IDS = new Set(['preamble', 'toc', 'pubinfo']);
