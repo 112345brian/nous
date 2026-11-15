@@ -79,7 +79,7 @@ test('populated index goes straight to ready and schedules backfills', async () 
   expect(result.phase).toBe('ready');
   expect(catalog.refreshIndexIfStale).toHaveBeenCalledTimes(1);
   const names = idleScheduler.schedule.mock.calls.map((c: unknown[]) => c[0]);
-  expect(names).toEqual(['resume-pending-math', 'backfill-math-hash-format', 'backfill-ast', 'auto-deep-sync']);
+  expect(names).toEqual(['resume-pending-math', 'backfill-math-hash-format', 'backfill-ast', 'auto-deep-sync', 'prewarm-common-math']);
 });
 
 test('empty index goes through indexing to ready', async () => {

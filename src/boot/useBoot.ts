@@ -6,6 +6,7 @@ import type { SeedPhase } from '../services/seedImport';
 import { backfillAst, backfillMathHashFormat, resumePendingMath, downloadAll, refreshIndexIfStale, syncCachedArticles } from '../services/catalog';
 import { preloadMathJax } from '../services/mathRender';
 import { idleScheduler } from '../services/idleScheduler';
+import { scheduleCommonMathPrewarm } from '../services/commonMathWiring';
 import { withDownloadHold } from '../services/mathPriority';
 import { startDownloadNotification, updateDownloadNotification, finishDownloadNotification } from '../services/downloadNotification';
 
@@ -95,6 +96,8 @@ export function useBoot(openArticle: (slug: string, title: string) => void): Boo
           }
         }
       });
+      // Lowest priority: queued last (FIFO), so it runs after everything above.
+      scheduleCommonMathPrewarm();
     })().catch(() => {});
   }, []);
 
