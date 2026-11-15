@@ -22,6 +22,7 @@ export const SRC = {
   toc: () => src('src/components/TocSheet.tsx'),
   graph: () => src('src/screens/GraphScreen.tsx'),
   db: () => src('src/services/db.ts'),
+  coreSchema: () => src('src/services/coreMigrations.ts'),
   injected: () => src('src/utils/injectedAssets.ts'),
   annotationJs: () => src('src/utils/annotationJs.ts'),
   readerCss: () => src('src/utils/readerCss.ts'),
