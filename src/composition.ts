@@ -12,7 +12,7 @@ import {
   getSlugsByCacheStatus, getCachedSlugs, getMeta, setMeta,
   upsertIndexEntries, cacheArticle, getEntryCount, indexLinks, getAllEntryTitles, invalidateLinkCache,
   cleanDenormalizedTitles, getEntryHtml, updateArticleHtml, setArticleAst,
-  getUncachedAstSlugs, setEntryNotes, getMathByHashes, putMathBatch,
+  getUncachedAstSlugs, setEntryNotes, getMathByHashes, putMathBatch, getLinksFrom,
   type UserDataExport, type BookmarkRow,
 } from './services/db';
 import type { Annotation, DownloadProgress, IndexEntry, LibraryScope } from './types';
@@ -35,7 +35,10 @@ import { renderMathBatch } from './services/mathRender';
 import { watchStalls, highResNow } from './services/stallWatch';
 import { expoSyncFolder } from './services/expoSyncFolder';
 import { zoteroHttp } from './services/zoteroHttp';
-import { startPrefetch as startPrefetchAdapter } from './services/prefetch';
+import { netInfoConnectivity, rnInteractions } from './services/prefetch';
+import { createPlatformProgressSink } from './services/downloadNotification';
+import { createPrefetcher } from './core/prefetch';
+import { createProgressNotifier } from './core/downloadNotifier';
 import { prewarmCommonMath, type PrewarmDeps } from './core/prewarmCommonMath';
 import { COMMON_MATH, commonMathStamp } from './data/commonMath';
 import { perf } from './services/perf';
@@ -235,9 +238,22 @@ export function backfillAst(): Promise<void> {
  * Once the reader has stayed on `slug` for a while, quietly cache a few of its uncached outgoing
  * links. Returns a cancel function: call it on navigation/unmount. Never throws.
  */
-export function startPrefetch(slug: string): () => void {
-  return startPrefetchAdapter(slug, s => fetchAndCacheArticle(s, { deferPriority: 'background' }));
-}
+export const startPrefetch: (slug: string) => () => void = createPrefetcher({
+  connectivity: netInfoConnectivity,
+  interactions: rnInteractions,
+  delay: { start: ms => { let t: ReturnType<typeof setTimeout>; return { done: new Promise<void>(r => { t = setTimeout(r, ms); }), cancel: () => clearTimeout(t) }; } },
+  links: { getLinksFrom },
+  fetchOne: s => fetchAndCacheArticle(s, { deferPriority: 'background' }),
+});
+
+// ── Download notification ────────────────────────────────────────────────────
+
+// Throttles progress updates (clock injected) and hands them to the platform sink. useBoot calls
+// these three around downloadAll.
+const downloadNotifier = createProgressNotifier({ sink: createPlatformProgressSink(), clock: { now: () => Date.now() } });
+export const startDownloadNotification = downloadNotifier.start;
+export const updateDownloadNotification = downloadNotifier.update;
+export const finishDownloadNotification = downloadNotifier.finish;
 
 // ── Common-equation pre-warm ─────────────────────────────────────────────────
 
