@@ -1,9 +1,11 @@
-import { renderMathChunked } from '../mathChunked';
-import type { MathReq, MathResult } from '../mathRender';
+import { createChunkedRenderer } from '../mathChunked';
+import type { MathRequest as MathReq, MathResult } from '../ports';
 
 const items = (n: number): MathReq[] => Array.from({ length: n }, (_, i) => ({ tex: `t${i}`, display: i % 2 === 0 }));
 const ok = async (its: MathReq[]): Promise<MathResult[]> => its.map(it => ({ ...it, b64: 'AA==', w: 1, h: 1 }));
 const now = async () => {};
+// The renderer and the gates are the instance's dependencies; each test also passes its own through the options.
+const renderMathChunked = createChunkedRenderer({ render: async its => ok(its), firstGate: now, nextGate: now, macrotask: async () => {} });
 
 it('splits into chunks, preserves order, one request in flight at a time', async () => {
   let inFlight = 0, max = 0;

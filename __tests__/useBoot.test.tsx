@@ -13,18 +13,22 @@ jest.mock('../src/services/db', () => ({
 jest.mock('../src/services/seedImport', () => ({ importSeedFromUrl: jest.fn() }));
 // The use cases come from the composition root. The common-math pre-warm is wired there too; its
 // stand-in schedules the same task name through the (mocked) idle scheduler, as the real one does.
-jest.mock('../src/composition', () => ({
-  backfillAst: jest.fn(),
-  resumePendingMath: jest.fn(),
-  downloadAll: jest.fn(),
-  refreshIndexIfStale: jest.fn(),
-  syncCachedArticles: jest.fn(),
-  scheduleCommonMathPrewarm: jest.fn(() =>
-    require('../src/services/idleScheduler').idleScheduler.schedule('prewarm-common-math', jest.fn())),
-}));
+jest.mock('../src/composition', () => {
+  // The scheduler and the download hold are built in the root; a stand-in schedules the pre-warm
+  // under the same task name through the same (mocked) scheduler, as the real one does.
+  const idleScheduler = { schedule: jest.fn() };
+  return {
+    backfillAst: jest.fn(),
+    resumePendingMath: jest.fn(),
+    downloadAll: jest.fn(),
+    refreshIndexIfStale: jest.fn(),
+    syncCachedArticles: jest.fn(),
+    idleScheduler,
+    withDownloadHold: jest.fn((fn: () => Promise<unknown>) => fn()),
+    scheduleCommonMathPrewarm: jest.fn(() => idleScheduler.schedule('prewarm-common-math', jest.fn())),
+  };
+});
 jest.mock('../src/services/mathRender', () => ({ preloadMathJax: jest.fn() }));
-jest.mock('../src/services/idleScheduler', () => ({ idleScheduler: { schedule: jest.fn() } }));
-jest.mock('../src/services/mathPriority', () => ({ withDownloadHold: jest.fn((fn: () => Promise<unknown>) => fn()) }));
 jest.mock('../src/services/downloadNotification', () => ({
   startDownloadNotification: jest.fn().mockResolvedValue(undefined),
   updateDownloadNotification: jest.fn().mockResolvedValue(undefined),
@@ -35,7 +39,7 @@ jest.mock('../src/services/downloadNotification', () => ({
 const db = require('../src/services/db');
 const seed = require('../src/services/seedImport');
 const root = require('../src/composition');
-const { idleScheduler } = require('../src/services/idleScheduler');
+const { idleScheduler } = require('../src/composition');
 
 const prefs = (over: object = {}) => ({ homeMode: 'search', downloadAll: false, seedUrl: '', ...over });
 

@@ -1,8 +1,10 @@
-import { InteractionManager } from 'react-native';
 import {
   DEFAULT_THROTTLE_CONFIG, HoldKind, MathPriority, ThrottleConfig, mayRun,
 } from '../utils/mathThrottlePolicy';
 
+// The scheduling mechanism. The clock, the timer and the interaction hook are parameters; the
+// app-wide instance is built in src/composition.ts.
+//
 // Runs background work (backfills, link indexing, graph layout priming, deep sync)
 // only while the reader is idle, one task at a time, so it never competes with
 // article render or scrolling on the single JS thread.
@@ -31,15 +33,15 @@ export interface IdleSchedulerOptions {
   idleMs?: number;
   /** Pause between consecutive tasks once the queue is draining. */
   gapMs?: number;
-  /** Defer the actual start until animations/gestures settle. */
+  /** Defer the actual start until animations/gestures settle. Default: start at once. */
   afterInteractions?: (cb: () => void) => void;
   onError?: (key: string, err: unknown) => void;
   /** Policy constants for whenMayRun; defaults to DEFAULT_THROTTLE_CONFIG. */
   throttle?: Partial<ThrottleConfig>;
-  /** Injected clock (ms). Defaults to Date.now. */
-  now?: () => number;
-  setTimer?: (fn: () => void, ms: number) => unknown;
-  clearTimer?: (handle: unknown) => void;
+  /** The clock (ms), the timer and its cancel: injected, never read from globals. */
+  now: () => number;
+  setTimer: (fn: () => void, ms: number) => unknown;
+  clearTimer: (handle: unknown) => void;
 }
 
 export interface IdleScheduler {
@@ -58,15 +60,13 @@ interface Task {
   run: () => unknown;
 }
 
-export function createIdleScheduler(opts: IdleSchedulerOptions = {}): IdleScheduler {
+export function createIdleScheduler(opts: IdleSchedulerOptions): IdleScheduler {
   const idleMs = opts.idleMs ?? 1500;
   const gapMs = opts.gapMs ?? 250;
   const afterInteractions = opts.afterInteractions ?? ((cb: () => void) => cb());
-  const setTimer = opts.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
-  const clearTimer = opts.clearTimer ?? ((h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>));
+  const { setTimer, clearTimer, now } = opts;
   const onError = opts.onError;
   const cfg: ThrottleConfig = { ...DEFAULT_THROTTLE_CONFIG, ...opts.throttle };
-  const now = opts.now ?? (() => Date.now());
 
   const queue: Task[] = [];
   const holdCounts: Record<HoldKind, number> = { reading: 0, download: 0 };
@@ -172,11 +172,3 @@ export function createIdleScheduler(opts: IdleSchedulerOptions = {}): IdleSchedu
   };
   return api;
 }
-
-/** App-wide instance. */
-export const idleScheduler = createIdleScheduler({
-  afterInteractions: cb => { InteractionManager.runAfterInteractions(cb); },
-  onError: (key, err) => {
-    if (__DEV__) console.warn(`[idleScheduler] ${key} failed`, err);
-  },
-});

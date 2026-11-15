@@ -1,12 +1,11 @@
-// Chunked front end for renderMathBatch. A large article becomes a series of
+// Chunked front end for the renderer. A large article becomes a series of
 // small WebView messages, one in flight at a time, each preceded by a yield
 // point so a higher-priority hold or reader activity stops the work at the next
 // chunk boundary. A batch already inside the WebView cannot be cancelled, so
 // chunkSize bounds how much work can still run after the reader acts.
 
-import { renderMathBatch, MathReq, MathResult } from './mathRender';
+import type { MathRequest as MathReq, MathResult } from './ports';
 import { DEFAULT_THROTTLE_CONFIG, MathPriority, chunkRanges } from '../utils/mathThrottlePolicy';
-import { whenMathMayRun, yieldThenMathMayRun, macrotask } from './mathPriority';
 
 export interface ChunkedOptions {
   /** null = ungated: the caller owns the schedule (e.g. runs under a download hold); only yields a macrotask between chunks. */
@@ -20,19 +19,31 @@ export interface ChunkedOptions {
    * stops and the error propagates.
    */
   onChunk?: (start: number, results: MathResult[]) => Promise<void>;
+  /** Overrides the renderer / gates this instance was built with (for tests). */
   render?: (items: MathReq[]) => Promise<MathResult[]>;
-  /** Yield point before the first chunk / between chunks (injectable for tests). */
   firstGate?: (p: MathPriority) => Promise<void>;
   nextGate?: (p: MathPriority) => Promise<void>;
 }
 
+export interface ChunkedDeps {
+  render: (items: MathReq[]) => Promise<MathResult[]>;
+  /** Yield point before the first chunk: wait until work of this priority may run. */
+  firstGate: (p: MathPriority) => Promise<void>;
+  /** Yield point between chunks: a macrotask pause, then wait until it may run. */
+  nextGate: (p: MathPriority) => Promise<void>;
+  /** A bare macrotask pause, used between chunks of an ungated (priority null) call. */
+  macrotask: () => Promise<void>;
+}
+
 const isTimeout = (r: MathResult) => r.error === 'timeout';
 
-export async function renderMathChunked(items: MathReq[], opts: ChunkedOptions): Promise<MathResult[]> {
+export function createChunkedRenderer(deps: ChunkedDeps): (items: MathReq[], opts: ChunkedOptions) => Promise<MathResult[]> {
+  const { macrotask } = deps;
+  return async function renderMathChunked(items: MathReq[], opts: ChunkedOptions): Promise<MathResult[]> {
   if (!items.length) return [];
-  const render = opts.render ?? renderMathBatch;
-  const first = opts.firstGate ?? whenMathMayRun;
-  const next = opts.nextGate ?? yieldThenMathMayRun;
+  const render = opts.render ?? deps.render;
+  const first = opts.firstGate ?? deps.firstGate;
+  const next = opts.nextGate ?? deps.nextGate;
   const ranges = chunkRanges(items.length, opts.chunkSize ?? DEFAULT_THROTTLE_CONFIG.chunkSize);
   const out: MathResult[] = [];
 
@@ -65,4 +76,5 @@ export async function renderMathChunked(items: MathReq[], opts: ChunkedOptions):
     }
   }
   return out;
+  };
 }

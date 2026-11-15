@@ -32,8 +32,8 @@ jest.mock('../db', () => ({
 const mockRender = jest.fn();
 jest.mock('../mathRender', () => ({ renderMathBatch: (...a: unknown[]) => mockRender(...a) }));
 
-import { _resetMathCacheState } from '../mathCache';
-import { fetchAndCacheArticle, resumePendingMath, downloadAll, syncCachedArticles } from '../../composition';   // wired in the composition root
+import { _resetMathCacheState } from '../../composition';   // the math runtime is built in the root
+import { fetchAndCacheArticle, resumePendingMath, downloadAll, syncCachedArticles, idleScheduler } from '../../composition';   // wired in the composition root
 
 const okRender = async (items: Array<{ tex: string; display: boolean }>) =>
   items.map(it => ({ ...it, b64: btoa('<svg/>'), w: 2, h: 1 }));
@@ -98,12 +98,16 @@ describe('skipMath articles are queued and drained (was: never rendered)', () =>
 
 describe('bulk downloads', () => {
   test('downloadAll renders nothing inline and queues every math article on math_pending', async () => {
-    const hold = jest.spyOn(require('../mathPriority'), 'yieldThenMathMayRun').mockImplementation(() => new Promise<void>(() => {}));
-    await downloadAll(() => {});
-    hold.mockRestore();
-    expect(mockRender).not.toHaveBeenCalled();
-    expect(JSON.parse(mockMeta.math_pending).sort()).toEqual(['a', 'b']);
-    expect(Object.keys(mockEntries).sort()).toEqual(['a', 'b']);
+    // A reading hold keeps the post-download drain parked, so the queue can be observed.
+    const release = idleScheduler.hold('reading');
+    try {
+      await downloadAll(() => {});
+      expect(mockRender).not.toHaveBeenCalled();
+      expect(JSON.parse(mockMeta.math_pending).sort()).toEqual(['a', 'b']);
+      expect(Object.keys(mockEntries).sort()).toEqual(['a', 'b']);
+    } finally {
+      release();
+    }
   });
 
   test('after downloadAll the pending list drains', async () => {

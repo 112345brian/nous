@@ -21,7 +21,7 @@ const rel = (p: string) => path.relative(ROOT, p);
 
 test('only the chunked wrapper calls renderMathBatch (nothing sends one giant batch)', () => {
   const offenders = files.filter(f => /renderMathBatch\s*\(/.test(fs.readFileSync(f, 'utf8')))
-    .map(rel).filter(f => !/src\/services\/(mathRender|mathChunked)\.ts$/.test(f));
+    .map(rel).filter(f => !/src\/(services\/mathRender|core\/mathChunked)\.ts$/.test(f));
   expect(offenders).toEqual([]);
 });
 
@@ -29,7 +29,7 @@ test('every yield point is awaited (a discarded promise would not pause anything
   const re = /((?:[\w$]+\.)*)(whenMathMayRun|yieldThenMathMayRun|whenMayRun|yieldThenMayRun|checkpoint)\(/g;
   const bad: string[] = [];
   for (const f of files) {
-    if (/idleScheduler\.ts$|mathPriority\.ts$/.test(f)) continue; // definitions
+    if (/idleScheduler\.ts$|mathPacing\.ts$/.test(f)) continue; // definitions
     fs.readFileSync(f, 'utf8').split('\n').forEach((line, i) => {
       const code = line.replace(/\/\/.*$/, '');
       let m: RegExpExecArray | null;

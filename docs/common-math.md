@@ -65,7 +65,7 @@ on a device has NOT been measured.
 
 - `prewarmCommonMath(deps)` (`src/services/prewarmCommonMath.ts`) is only the list-specific
   part: when the stamp is current it does nothing; otherwise it calls
-  `ensureMath(list, 'background')` (`src/services/mathCache.ts`) and records the stamp only if
+  `ensureMath(list, 'background')` (`src/core/mathCache.ts`, instance built in `src/composition.ts`) and records the stamp only if
   that completed. `ensureMath` already hashes (`mathHash`/`normalizeTex`,
   `src/utils/mathKey.ts`), dedupes, skips stored hashes, renders in chunks and persists each
   chunk before the next.

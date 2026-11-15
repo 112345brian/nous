@@ -65,6 +65,7 @@ const CONVERTED = [
   'refreshIndexIfStale', 'fetchAndCacheArticle', 'downloadAll', 'syncCachedArticles',
   'onMathReady', 'completeArticleMath', 'resumePendingMath',
   'backfillAst', 'ensureNotesCached', 'startPrefetch', 'scheduleCommonMathPrewarm',
+  'idleScheduler', 'withDownloadHold', 'ensureMath',
 ];
 
 // RC3 exceptions: a file other than composition.ts that still wires a core use case.

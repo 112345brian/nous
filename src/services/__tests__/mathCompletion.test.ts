@@ -4,7 +4,7 @@
 // src/core/mathCompletion.ts and kept unchanged afterwards. db and the renderer are fakes.
 import { completeArticleMath, onMathReady, resumePendingMath, fetchAndCacheArticle } from '../../composition';   // wired in the composition root
 import * as db from '../db';
-import { _resetMathCacheState } from '../mathCache';
+import { _resetMathCacheState } from '../../composition';   // the math runtime is built in the root
 import { parseSepHtml } from '../../utils/sepHtml/parse';
 
 const mockMeta: Record<string, string> = {};

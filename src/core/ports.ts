@@ -144,3 +144,26 @@ export interface NotesStore {
   setEntryNotes(slug: string, notesHtml: string): Promise<void>;
 }
 
+/** One equation to typeset. */
+export interface MathRequest { tex: string; display: boolean }
+/** The outcome for one equation, in the order requested: an SVG (base64) with its size, or an error. */
+export interface MathResult {
+  tex: string;
+  display: boolean;
+  b64?: string; // base64 of the standalone SVG
+  w?: number;
+  h?: number;
+  error?: string; // 'timeout' | 'render-failed' | 'missing' are transient; anything else means the TeX itself was rejected
+}
+
+/** Typesets equations. Today a hidden WebView running MathJax; always one result per request. */
+export interface MathRenderer {
+  render(items: MathRequest[]): Promise<MathResult[]>;
+}
+
+/** The equation table: rendered SVGs by content hash. */
+export interface MathStore {
+  getMathByHashes(hashes: string[]): Promise<Array<{ hash: string; w: number; h: number }>>;
+  putMathBatch(rows: Array<{ hash: string; svg: string; w: number; h: number; display: boolean }>): Promise<void>;
+}
+

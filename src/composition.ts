@@ -6,13 +6,13 @@
 // Adapters live in src/services (db, catalog's fetch and equation functions, expoSyncFolder,
 // zoteroHttp, mathPriority, prefetch, ...). Each use case in src/core takes the ports it needs
 // as a parameter; this file is where they meet.
-import { Platform } from 'react-native';
+import { InteractionManager, Platform } from 'react-native';
 import {
   getSyncFolder, exportUserData, importUserData, getArticleVersionDate,
   getSlugsByCacheStatus, getCachedSlugs, getMeta, setMeta,
   upsertIndexEntries, cacheArticle, getEntryCount, indexLinks, getAllEntryTitles, invalidateLinkCache,
   cleanDenormalizedTitles, getEntryHtml, updateArticleHtml, setArticleAst,
-  getUncachedAstSlugs, setEntryNotes,
+  getUncachedAstSlugs, setEntryNotes, getMathByHashes, putMathBatch,
   type UserDataExport, type BookmarkRow,
 } from './services/db';
 import type { Annotation, DownloadProgress, IndexEntry, LibraryScope } from './types';
@@ -23,20 +23,70 @@ import { downloadAll as downloadAllUseCase, syncCachedArticles as syncCachedUseC
 import { refreshIndexIfStale as refreshIndexUseCase } from './core/refreshIndex';
 import { fetchAndCacheArticle as cacheArticleUseCase, type CacheArticleOptions } from './core/cacheArticle';
 import { createMathCompletion } from './core/mathCompletion';
+import { createIdleScheduler } from './core/idleScheduler';
+import { createMathPacing } from './core/mathPacing';
+import { createChunkedRenderer } from './core/mathChunked';
+import { createMathCache } from './core/mathCache';
+import { createSubstituteMath } from './core/substituteMath';
 import { backfillAst as backfillAstUseCase } from './core/backfills';
 import { ensureNotesCached as ensureNotesUseCase } from './core/ensureNotes';
-import { fetchIndexHtml, fetchArticleHtml, fetchNotesHtml, substitutemath } from './services/catalog';
+import { fetchIndexHtml, fetchArticleHtml, fetchNotesHtml } from './services/catalog';
+import { renderMathBatch } from './services/mathRender';
+import { watchStalls, highResNow } from './services/stallWatch';
 import { expoSyncFolder } from './services/expoSyncFolder';
 import { zoteroHttp } from './services/zoteroHttp';
 import { startPrefetch as startPrefetchAdapter } from './services/prefetch';
-import { withDownloadHold, yieldThenMathMayRun, watchStalls } from './services/mathPriority';
-import { ensureMath } from './services/mathCache';
-import { idleScheduler } from './services/idleScheduler';
 import { prewarmCommonMath, type PrewarmDeps } from './core/prewarmCommonMath';
 import { COMMON_MATH, commonMathStamp } from './data/commonMath';
 import { perf } from './services/perf';
 import { linkifyHtml } from './utils/linkifier';
 import seedEntries from './assets/entry-seed.json';
+
+declare const __DEV__: boolean | undefined;
+
+// ── Math runtime ─────────────────────────────────────────────────────────────
+
+// The pieces of equation rendering, built once here and shared: the idle scheduler (holds,
+// quiet-gap policy, background tasks), the pacing helpers around it, the chunked renderer, the
+// equation cache and the substitution that rewrites an article's TeX. Each core piece takes the
+// clock, the timer and the renderer as parameters; this is the only place they are real.
+const setTimer = (fn: () => void, ms: number) => setTimeout(fn, ms);
+
+export const idleScheduler = createIdleScheduler({
+  now: () => Date.now(),
+  setTimer,
+  clearTimer: h => clearTimeout(h as ReturnType<typeof setTimeout>),
+  afterInteractions: cb => { InteractionManager.runAfterInteractions(cb); },
+  onError: (key, err) => {
+    if (typeof __DEV__ !== 'undefined' && __DEV__) console.warn(`[idleScheduler] ${key} failed`, err);
+  },
+});
+
+const pacing = createMathPacing({ scheduler: idleScheduler, setTimer, now: highResNow });
+export const { withDownloadHold, whenMathMayRun, yieldThenMathMayRun } = pacing;
+
+const renderChunked = createChunkedRenderer({
+  render: renderMathBatch,
+  firstGate: pacing.whenMathMayRun,
+  nextGate: pacing.yieldThenMathMayRun,
+  macrotask: () => pacing.macrotask(),
+});
+
+const mathCache = createMathCache({
+  store: { getMathByHashes, putMathBatch },
+  renderChunked,
+  pause: pacing.yieldThenMathMayRun,
+  macrotask: () => pacing.macrotask(),
+});
+export const ensureMath = mathCache.ensureMath;
+/** Test hook: forget this run's equation-failure bookkeeping (a restart does the same). */
+export const _resetMathCacheState = mathCache.reset;
+
+const substitutemath = createSubstituteMath({
+  ensureMath: mathCache.ensureMath,
+  meta: { getMeta },
+  mathSlice: pacing.mathSlice,
+});
 
 // ── Sync folder and Zotero ───────────────────────────────────────────────────
 
@@ -203,11 +253,11 @@ export function startPrefetch(slug: string): () => void {
 export const COMMON_MATH_META_KEY = 'common_math_prewarm';
 export const COMMON_MATH_TASK_KEY = 'prewarm-common-math';
 
-export function realPrewarmDeps(): PrewarmDeps {
+export function realPrewarmDeps(ensure: typeof ensureMath = ensureMath): PrewarmDeps {
   return {
     list: COMMON_MATH,
     stamp: commonMathStamp(),
-    ensure: spots => ensureMath(spots, 'background'),
+    ensure: spots => ensure(spots, 'background'),
     getStamp: () => getMeta(COMMON_MATH_META_KEY),
     setStamp: s => setMeta(COMMON_MATH_META_KEY, s),
   };

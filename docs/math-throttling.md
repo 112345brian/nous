@@ -24,20 +24,20 @@ starts when the article finished opening / the download finished.
   answers "may this run now, and if not, what is blocking and for how long"; `chunkRanges`;
   `createSliceBudget(now, ms)`. No I/O, no timers; the clock is injected. Tests with a fake clock:
   `src/utils/__tests__/mathThrottlePolicy.test.ts`.
-* `src/services/idleScheduler.ts`: `hold(kind = 'reading')`, `noteActivity()` (both
+* `src/core/idleScheduler.ts` (the app-wide instance is built in `src/composition.ts`): `hold(kind = 'reading')`, `noteActivity()` (both
   unchanged for existing callers), plus the cooperative yield points
   `whenMayRun(priority)` and `yieldThenMayRun(priority)` (a 16 ms macrotask pause, then
   `whenMayRun`). A running task is still never interrupted; it stops at its next
   `await whenMayRun(...)`. New tasks also don't start during a `download` hold.
-* `src/services/mathChunked.ts`: `renderMathChunked(items, {priority})`. One WebView message
+* `src/core/mathChunked.ts`: `renderMathChunked(items, {priority})`. One WebView message
   per chunk, one in flight, yield point before each. Per-item results keep their order and
   errors; a chunk that throws or returns short becomes per-item errors; a fully timed-out
   chunk stops the rest (otherwise N chunks x 30 s timeout) and the article stays pending.
   `chunkSize: Infinity` is the old single batch. `priority: null` = ungated, used only by the
   `awaitMath` path of `syncCachedArticles`, which already runs under its own download hold
   (gating would deadlock).
-* `src/utils/mathKey.ts`, `src/services/mathCache.ts`: key, dedupe, chunk persistence (below).
-* `src/services/mathPriority.ts`: singleton wiring: `whenMathMayRun`, `yieldThenMathMayRun`,
+* `src/utils/mathKey.ts`, `src/core/mathCache.ts`: key, dedupe, chunk persistence (below).
+* `src/core/mathPacing.ts` (instance in `src/composition.ts`): `whenMathMayRun`, `yieldThenMathMayRun`,
   `withDownloadHold`, `mathSlice` (time-sliced loops) and the dev-only `watchStalls`.
 * `src/utils/stallDetector.ts`: dev-only JS-thread stall detector (timer lateness).
 * `catalog.ts` changes are small: `substitutemath(html, priority)` calls `ensureMath` and keeps only the splice loop
@@ -62,7 +62,7 @@ the first unfinished article.
 `hash64(normalizeTex(tex), display)`, where normalization only trims and collapses whitespace
 runs (braces and commands are untouched: `x_1` and `x_{1}` stay separate). `catalog.ts`
 
-`src/services/mathCache.ts` `ensureMath(spots, priority)` is the one function both the first
+`src/core/mathCache.ts` `ensureMath(spots, priority)` is the one function both the first
 render and a resume go through:
 
 1. hash every spot and dedupe by hash;

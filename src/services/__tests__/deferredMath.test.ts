@@ -38,7 +38,7 @@ jest.mock('../mathRender', () => ({
 }));
 
 import * as db from '../db';
-import { _resetMathCacheState } from '../mathCache';
+import { _resetMathCacheState } from '../../composition';   // the math runtime is built in the root
 import { fetchAndCacheArticle, onMathReady, completeArticleMath, resumePendingMath } from '../../composition';   // wired in the composition root
 
 const PAGE = `<html><head><title>Logic (Stanford Encyclopedia of Philosophy)</title></head>

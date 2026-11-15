@@ -24,7 +24,7 @@ const mockRender = jest.fn();
 jest.mock('../mathRender', () => ({ renderMathBatch: (...a: unknown[]) => mockRender(...a) }));
 
 import * as db from '../db';
-import { _resetMathCacheState } from '../mathCache';
+import { _resetMathCacheState } from '../../composition';   // the math runtime is built in the root
 import { backfillAst, ensureNotesCached } from '../../composition';   // wired in the composition root
 import { parseSepHtml } from '../../utils/sepHtml/parse';
 
