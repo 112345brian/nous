@@ -289,3 +289,24 @@ describe('clearArticleCache', () => {
     expect(await m.getSessions(30)).toHaveLength(1);
   });
 });
+
+describe('adapter wiring of the core merge (importUserData)', () => {
+  it('gives a uid-less annotation a 128-bit hex uid and the real clock', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(4242);
+    await m.importUserData({ version: 1, exported_at: 0, reads: [], bookmarks: [], prefs: {},
+      annotations: [{ slug: 's', selected_text: 'x' } as any] });
+    const row: any = raw.raw.prepare('SELECT * FROM annotations').get();
+    expect(row.uid).toMatch(/^[0-9a-f]{32}$/);
+    expect(row.created_at).toBe(4242);
+    jest.restoreAllMocks();
+  });
+  it('recordRead starts a new session after the 30-minute gap and keeps it inside', async () => {
+    const spy = jest.spyOn(Date, 'now');
+    spy.mockReturnValue(1_000); await m.recordRead('a', 'A', null);
+    spy.mockReturnValue(1_000 + 60_000); await m.recordRead('b', 'B', 'a');
+    spy.mockReturnValue(1_000 + 60_000 + 31 * 60_000); await m.recordRead('c', 'C', null);
+    const ids = raw.raw.prepare('SELECT session_id FROM reads ORDER BY visited_at').all().map((r: any) => r.session_id);
+    expect(ids).toEqual(['1000', '1000', String(1_000 + 60_000 + 31 * 60_000)]);
+    jest.restoreAllMocks();
+  });
+});

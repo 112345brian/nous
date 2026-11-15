@@ -1,12 +1,17 @@
 // Merge one imported annotation into the local table.
 //
-// Kept free of expo imports so it can be unit-tested against a plain SQLite.
+// Core: takes the database as a SqlRunner port, and the clock and uid source as
+// parameters (never Date.now / Math.random).
 // Annotation integer ids are device-local autoincrements, so they must NEVER be
 // used to match records across devices — `uid` is the cross-device identity.
 
-export interface SqlRunner {
-  runAsync(sql: string, params?: any[]): Promise<unknown>;
-  getFirstAsync<T>(sql: string, params?: any[]): Promise<T | null>;
+import type { Clock, SqlRunner } from './ports';
+export type { SqlRunner };
+
+/** The nondeterministic inputs of a merge: the wall clock and a fresh-uid source. */
+export interface MergeDeps {
+  clock: Clock;
+  newUid(): string;
 }
 
 /** Shape read from a sync file; every field but the text may be missing (v1 files, partial objects). */
@@ -22,19 +27,12 @@ export interface ImportedAnnotation {
   updated_at?: number;
 }
 
-/** Random 128-bit hex id; crypto.randomUUID is not guaranteed on Hermes. */
-export function newUid(): string {
-  let s = '';
-  for (let i = 0; i < 4; i++) s += Math.floor(Math.random() * 0x100000000).toString(16).padStart(8, '0');
-  return s;
-}
-
 /** Returns true if a row was inserted or updated, false if skipped (invalid or older). */
-export async function mergeAnnotation(db: SqlRunner, a: ImportedAnnotation): Promise<boolean> {
+export async function mergeAnnotation(db: SqlRunner, a: ImportedAnnotation, deps: MergeDeps): Promise<boolean> {
   if (!a || typeof a.slug !== 'string' || !a.slug || typeof a.selected_text !== 'string' || !a.selected_text) {
     return false;
   }
-  const created = typeof a.created_at === 'number' ? a.created_at : Date.now();
+  const created = typeof a.created_at === 'number' ? a.created_at : deps.clock.now();
   const updated = typeof a.updated_at === 'number' ? a.updated_at : created;
   const color = a.color || '#FFE566';
 
@@ -54,7 +52,7 @@ export async function mergeAnnotation(db: SqlRunner, a: ImportedAnnotation): Pro
       `INSERT INTO annotations
          (uid, slug, selected_text, context, note, color, content_hash, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [a.uid || newUid(), a.slug, a.selected_text, a.context ?? null, a.note ?? null,
+      [a.uid || deps.newUid(), a.slug, a.selected_text, a.context ?? null, a.note ?? null,
        color, a.content_hash ?? null, created, updated]);
     return true;
   }

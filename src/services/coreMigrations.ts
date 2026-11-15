@@ -8,8 +8,10 @@
 // `ast_parser_version` in the meta table, guarded on that value so it is a no-op
 // when already applied. The initial step records version 2 (the current parser).
 
-import type { Migration } from './migrations';
-import { READS_UNIQUE_INDEX_SQL } from './readsMerge';
+import type { Migration } from '../core/migrations';
+
+export const READS_UNIQUE_INDEX_SQL =
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_reads_identity ON reads(slug, visited_at, session_id)';
 
 // The initial schema (version 1): final tables, columns, FTS table and indexes.
 //

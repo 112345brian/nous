@@ -1,18 +1,20 @@
 import * as SQLite from 'expo-sqlite';
-import type { EntryRow, EntrySummary, ReadRow, ReadNode, Session, Annotation } from '../types';
+import type { EntryRow, EntrySummary, ReadRow, Session, Annotation } from '../types';
 import { makeExcerpt } from '../utils/excerpt';
-import { contentHash } from '../utils/contentHash';
+import { contentHash, resolveEntryHash } from '../utils/contentHash';
 import { formatCitation } from '../utils/citation';
 
 // Re-exported so existing callers (screens, on-device tests) keep importing from services/db.
-export { contentHash, formatCitation };
+export { contentHash, resolveEntryHash, formatCitation };
 import { buildFtsQuery } from '../utils/ftsQuery';
 import { mathTierStamp, TIERED_MATH_DEFAULT } from '../utils/mathTier';
 import { CORE_MIGRATIONS } from './coreMigrations';
-import { runMigrations, userVersionStore } from './migrations';
 import { secretsAvailable, getSecret, setSecret, deleteSecret } from './secureSecrets';
-import { mergeAnnotation, newUid } from './annotationMerge';
-import { mergeRead } from './readsMerge';
+import { mergeAnnotation } from '../core/annotationMerge';
+import { mergeRead } from '../core/readsMerge';
+import { runMigrations, userVersionStore } from '../core/migrations';
+import { sessionIdFor, groupSessions } from '../utils/readSessions';
+import { scopeFilter, countWords } from '../utils/libraryScope';
 
 // One shared connection. getDb() caches the *promise* of an opened-and-migrated
 // database, so concurrent callers share a single open and none can observe a
@@ -99,16 +101,6 @@ export async function getEntryCount(): Promise<number> {
     'SELECT COUNT(*) as count FROM entries'
   );
   return row?.count ?? 0;
-}
-
-// Library scope filter, bound as a parameter. `scope` is typed as a closed union
-// but not guaranteed at runtime: getPrefs casts an untyped meta string, and
-// importUserData can set that string from a sync-folder file. A value outside
-// the union therefore matches no rows instead of being spliced into the SQL.
-function scopeFilter(scope: 'all' | 'sep' | 'owl'): { where: string; params: string[] } {
-  return scope === 'all'
-    ? { where: '', params: [] }
-    : { where: 'WHERE source = ?', params: [scope] };
 }
 
 export async function getEntryCounts(scope: 'all' | 'sep' | 'owl' = 'all'): Promise<{ total: number; cached: number }> {
@@ -356,8 +348,6 @@ export async function searchEntries(query: string, limit = 60): Promise<EntrySum
   );
 }
 
-const SESSION_GAP_MS = 30 * 60 * 1000;
-
 export async function recordRead(
   slug: string,
   title: string,
@@ -371,10 +361,7 @@ export async function recordRead(
     'SELECT visited_at, session_id FROM reads ORDER BY visited_at DESC LIMIT 1'
   );
 
-  const sessionId =
-    last && now - last.visited_at < SESSION_GAP_MS
-      ? last.session_id
-      : String(now);
+  const sessionId = sessionIdFor(last, now);
 
   await db.runAsync(
     `INSERT OR IGNORE INTO reads (slug, title, visited_at, from_slug, session_id)
@@ -443,57 +430,8 @@ export async function getSessions(limit = 30): Promise<Session[]> {
     [bounded]
   );
 
-  // Group by session_id
-  const sessionMap = new Map<string, ReadRow[]>();
-  for (const row of rows) {
-    const list = sessionMap.get(row.session_id) ?? [];
-    list.push(row);
-    sessionMap.set(row.session_id, list);
-  }
-
-  const sessions: Session[] = [];
-  for (const [sessionId, reads] of sessionMap) {
-    sessions.push({
-      session_id: sessionId,
-      started_at: reads[0].visited_at,
-      roots: buildTree(reads),
-      total: reads.length,
-    });
-  }
-
   // Newest first (the query already limited which sessions are present)
-  return sessions.reverse();
-}
-
-function buildTree(reads: ReadRow[]): ReadNode[] {
-  const bySlug = new Map<string, ReadNode>();
-
-  // First pass: create nodes
-  for (const r of reads) {
-    // If same slug appears multiple times in a session, keep latest
-    bySlug.set(r.slug, { ...r, depth: 0, children: [] });
-  }
-
-  const roots: ReadNode[] = [];
-
-  // Second pass: wire parent → child
-  for (const r of reads) {
-    const node = bySlug.get(r.slug)!;
-    if (r.from_slug && bySlug.has(r.from_slug)) {
-      bySlug.get(r.from_slug)!.children.push(node);
-    } else {
-      roots.push(node);
-    }
-  }
-
-  // Third pass: compute depths
-  function setDepth(node: ReadNode, d: number) {
-    node.depth = d;
-    for (const child of node.children) setDepth(child, d + 1);
-  }
-  for (const root of roots) setDepth(root, 0);
-
-  return roots;
+  return groupSessions(rows);
 }
 
 const metaCache = new Map<string, string | null>();
@@ -880,6 +818,15 @@ export async function getAllAnnotations(): Promise<AnnotationWithTitle[]> {
   `);
 }
 
+// The wall clock and uid source the core merge takes as parameters.
+// Random 128-bit hex id; crypto.randomUUID is not guaranteed on Hermes.
+function newUid(): string {
+  let s = '';
+  for (let i = 0; i < 4; i++) s += Math.floor(Math.random() * 0x100000000).toString(16).padStart(8, '0');
+  return s;
+}
+const MERGE_DEPS = { clock: { now: () => Date.now() }, newUid };
+
 // ── JSON user data export / import ───────────────────────────────────────────
 
 export interface UserDataExport {
@@ -944,7 +891,7 @@ export async function importUserData(data: UserDataExport): Promise<void> {
     // Annotations: matched across devices by uid (never by the local integer id),
     // last writer wins per record — see annotationMerge.ts.
     for (const a of data.annotations ?? []) {
-      await mergeAnnotation(db, a);
+      await mergeAnnotation(db, a, MERGE_DEPS);
     }
     // Prefs: merge, remote wins — allowlisted keys only, so a file can never
     // write credentials, device paths or caches into this device's meta.
@@ -985,15 +932,4 @@ export async function deleteAnnotations(ids: number[]): Promise<void> {
   const db = await getDb();
   const placeholders = ids.map(() => '?').join(',');
   await db.runAsync(`DELETE FROM annotations WHERE id IN (${placeholders})`, ids);
-}
-
-function countWords(html: string): number {
-  return html.replace(/<[^>]*>/g, ' ').trim().split(/\s+/).filter(Boolean).length;
-}
-
-// The article's hash for annotation anchoring. `cacheArticle` stores it in
-// `entries.content_hash`, so opening an article reads it back in O(1); only rows
-// cached before that column existed (null/empty) pay for a one-off rehash.
-export function resolveEntryHash(entry: Pick<EntryRow, 'content_hash' | 'content_html'>): string {
-  return entry.content_hash || contentHash(entry.content_html ?? '');
 }

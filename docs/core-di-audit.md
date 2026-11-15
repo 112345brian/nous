@@ -31,7 +31,7 @@ because they leak state or globals into the logic that calls them.
 | `services/dataSync.ts` | none | `expo-file-system`, `react-native` `Platform`, `fetch`, `db` | `Date` (Zotero "today"), `process.env.HOME` | `SyncFolder`, `UserDataStore`, `ZoteroHttp`, `Clock` | **Converted** (see section 4) |
 | `utils/linkifier.ts` | `_default` (lazy cache of the compiled link index) | none (bundled data module only) | none | the index as a parameter | **Converted**: `createLinkifier(json)`; the lazy default is the one recorded exception |
 | `services/catalog.ts` | none | `./db`, `fetch` x3 (index, article and notes pages), `./perf` | `setTimeout` (the 30 s abort) | it is the adapter module for SEP pages; everything else it used to hold is in `src/core`, wired in `composition.ts` | **Converted** (section 4); only the upgrade-only `backfillMathHashFormat` remains in logic form (section 8) |
-| `services/db.ts` | `_db` (connection), `metaCache`, `_linkCache` | `expo-sqlite` | `Date.now` x7 | it **is** the `LibraryStore` / `UserStore` / `KeyValueStore` adapter; nothing to inject into it | Listed; 4 sessions editing it |
+| `services/db.ts` | `_open`/`_closing` (connection), `metaCache`, `_linkCache` | `expo-sqlite` | `Date.now` x7 | it **is** the `LibraryStore` / `UserStore` / `KeyValueStore` adapter; nothing to inject into it | **Pure logic moved out** (db-pure-logic, below); SQL and the caches stay |
 | `services/graphDb.ts` | `_schema` (creates its own tables lazily) | `getDb()` x4 from `./db` | `Date.now` x4 | `GraphStore` adapter; the graph assembly (nodes/edges from rows) is pure and could move inward | Listed |
 | `services/inpho.ts` | `_primedSlugs` (Set) | `fetch` (`getJson`), `expo-file-system` (dev-seed files, `__DEV__` only), `getMeta/setMeta` from `./db` | `Date.now` x2, `setTimeout` x1 | `GraphSource`, `KeyValueStore`, `Clock`, `Sleep` | Listed |
 | `services/mathRender.ts` | 7 module variables (`injectFn`, `domReady`, `resolveReady`, `readyPromise`, `mathJaxLoading`, `seq`, `pending`) forming a bridge to the WebView component | `expo-asset`, `expo-file-system` | `setTimeout` (timeout race) | `MathRenderer` (batch **and** readiness lifecycle) | Listed |
@@ -310,3 +310,16 @@ branch, and converting everything this audit listed, these remain outside `src/c
   port) and `seedImport`.
 - The parent tests that imported `downloadAll`, `syncCachedArticles`, `completeArticleMath` and
   friends from `services/catalog` now import them from `composition`. Only import lines changed.
+
+### db-pure-logic slice (merge, migrations, db.ts helpers)
+
+| Moved | To | Notes |
+|---|---|---|
+| `mergeAnnotation`, `ImportedAnnotation` | `core/annotationMerge.ts` | Takes `SqlRunner` (new port in `ports.ts`) and `MergeDeps` (`Clock` + `newUid`); the adapter supplies `Date.now` and the `Math.random` uid generator (`newUid` now lives in `db.ts`). |
+| `mergeRead`, `ImportedRead` | `core/readsMerge.ts` | `READS_UNIQUE_INDEX_SQL` is schema data and now sits in `services/coreMigrations.ts`. |
+| `runMigrations`, `userVersionStore`, `tableVersionStore`, `Migration`, `VersionStore` | `core/migrations.ts` | Database is the `MigrationDb` port. `services/migrations.ts` is a re-export kept only for `graphDb.ts` (recorded RC3 exception). |
+| `buildTree`, session grouping, 30-minute session rule | `utils/readSessions.ts` | `getSessions` / `recordRead` call them. |
+| `scopeFilter`, `countWords` | `utils/libraryScope.ts` | |
+| `resolveEntryHash` | `utils/contentHash.ts` | Still re-exported from `db.ts` (ArticleScreen imports it there). |
+
+Left in `db.ts` on purpose: `_open`/`_closing` (the one shared connection and its open/close handshake: it is the adapter's state, and `seedImport` closes it through `closeDb`); `metaCache` (a read-through cache of the `meta` table that must stay in step with every direct write in the same file); `_linkCache` (same, for the link index; the fallback to the bundled asset is a dynamic import, which the core may not do). `db.ts` also stays the one place that calls `runMigrations` and the merges, hence the RC3 exception.

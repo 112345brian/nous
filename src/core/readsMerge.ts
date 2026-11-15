@@ -1,12 +1,9 @@
-// Reads sync helpers. Kept free of expo imports so they run against plain SQLite in tests.
+// Reads sync helpers. Core: the database comes in as a SqlRunner port.
 //
 // A read's cross-device identity is (slug, visited_at, session_id). The unique index
-// on those columns (coreMigrations.ts) is what lets `INSERT OR IGNORE` ignore a
+// on those columns (READS_UNIQUE_INDEX_SQL in services/coreMigrations.ts) is what lets `INSERT OR IGNORE` ignore a
 // read that is already present.
-import type { SqlRunner } from './annotationMerge';
-
-export const READS_UNIQUE_INDEX_SQL =
-  'CREATE UNIQUE INDEX IF NOT EXISTS idx_reads_identity ON reads(slug, visited_at, session_id)';
+import type { SqlRunner } from './ports';
 
 export interface ImportedRead {
   slug?: string;
