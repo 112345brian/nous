@@ -174,6 +174,70 @@ describe('importSeedFromUrl when something goes wrong', () => {
   });
 });
 
+describe('importSeedFromUrl: order and phases', () => {
+  it('snapshots, closes, backs up, replaces, restores, and only then drops the backup', async () => {
+    await run();
+    const at = (pred: (l: string) => boolean) => state.log.findIndex(pred);
+    const exp = at(l => l === 'exportUserData');
+    const close = at(l => l === 'closeDb');
+    const copy = at(l => l.startsWith('copy'));
+    const swap = at(l => l.startsWith('move') && l.endsWith(`-> ${DB_PATH}`));
+    const restore = at(l => l === 'importUserData');
+    const dropBackup = at(l => l.startsWith('delete') && l.includes('pre-seed-backup'));
+    expect([exp, close, copy, swap, restore, dropBackup].every(i => i >= 0)).toBe(true);
+    expect([exp, close, copy, swap, restore, dropBackup]).toEqual([exp, close, copy, swap, restore, dropBackup].slice().sort((a, b) => a - b));
+  });
+
+  it('reports downloading (with progress), then validating, then installing', async () => {
+    const seen: any[] = [];
+    await importSeedFromUrl(URL, p => seen.push(p));
+    expect(seen).toEqual([
+      { phase: 'downloading', bytesWritten: 40, bytesTotal: 100 },
+      { phase: 'downloading', bytesWritten: 100, bytesTotal: 100 },
+      { phase: 'validating' },
+      { phase: 'installing' },
+    ]);
+  });
+});
+
+describe('importSeedFromUrl: more failure paths leave the old database intact', () => {
+  const intact = () => {
+    expect(dbAt(DB_PATH).label).toBe('old');
+    expect(dbAt(DB_PATH).bookmarks).toHaveLength(1);
+    expect([...files.keys()]).toEqual([DB_PATH]);
+  };
+  it('the download throws: nothing is touched', async () => {
+    state.failDownload = true;
+    await expect(run()).rejects.toThrow('network down');
+    intact();
+    expect(state.log).not.toContain('closeDb');
+  });
+  it('the snapshot cannot be read: nothing is touched', async () => {
+    state.failExport = true;
+    await expect(run()).rejects.toThrow('export failed');
+    intact();
+    expect(state.log).not.toContain('closeDb');
+    expect(state.log.some(l => l.startsWith('copy'))).toBe(false);
+  });
+  it('closing the connection fails: the file is not touched', async () => {
+    state.failClose = true;
+    await expect(run()).rejects.toThrow('close failed');
+    intact();
+    expect(state.log.some(l => l.startsWith('copy'))).toBe(false);
+  });
+  it('the backup copy fails: the old database stays', async () => {
+    state.failCopy = true;
+    await expect(run()).rejects.toThrow('copy failed');
+    expect(dbAt(DB_PATH).label).toBe('old');
+  });
+  it('rollback itself fails: the error says where the backup is kept, and the backup is not deleted', async () => {
+    state.failImport = true;
+    state.failMoveFromBackup = true;
+    await expect(run()).rejects.toThrow(/restore failed.*could not be put back.*pre-seed-backup/);
+    expect([...files.keys()].some(k => k.includes('pre-seed-backup'))).toBe(true);
+  });
+});
+
 describe('the SDK 54 file API', () => {
   it('seedImport.ts takes its file functions from expo-file-system/legacy, not the throwing main entry', () => {
     const src = readFileSync(join(__dirname, '..', 'seedImport.ts'), 'utf8');

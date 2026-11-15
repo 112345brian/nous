@@ -35,6 +35,11 @@ export const state = {
   open: null as FakeDb | null,
   failImport: false,
   failMoveInto: null as string | null,
+  failMoveFromBackup: false,
+  failCopy: false,
+  failDownload: false,
+  failExport: false,
+  failClose: false,
   downloadStatus: 200,
   seed: null as FakeFile | null,
   log: [] as string[],
@@ -48,6 +53,11 @@ export function resetWorld(): void {
   state.open = null;
   state.failImport = false;
   state.failMoveInto = null;
+  state.failMoveFromBackup = false;
+  state.failCopy = false;
+  state.failDownload = false;
+  state.failExport = false;
+  state.failClose = false;
   state.downloadStatus = 200;
   state.seed = null;
   state.log = [];
@@ -76,6 +86,7 @@ export const fakeLegacyFs = {
       state.failMoveInto = null; // fail once; the rollback's own move must work
       throw new Error('disk full');
     }
+    if (state.failMoveFromBackup && from.includes('pre-seed-backup')) throw new Error('cannot restore');
     const f = files.get(from);
     if (!f) throw new Error(`move: no such file ${from}`);
     files.set(to, f);
@@ -83,14 +94,18 @@ export const fakeLegacyFs = {
   },
   async copyAsync({ from, to }: { from: string; to: string }) {
     state.log.push(`copy ${from} -> ${to}`);
+    if (state.failCopy) throw new Error('copy failed');
     const f = files.get(from);
     if (!f) throw new Error(`copy: no such file ${from}`);
     if (files.has(to)) throw new Error(`copy: destination exists ${to}`);
     files.set(to, clone(f));
   },
-  createDownloadResumable(_url: string, to: string) {
+  createDownloadResumable(_url: string, to: string, _opts?: unknown, cb?: (p: { totalBytesWritten: number; totalBytesExpectedToWrite: number }) => void) {
     return {
       async downloadAsync() {
+        if (state.failDownload) throw new Error('network down');
+        cb?.({ totalBytesWritten: 40, totalBytesExpectedToWrite: 100 });
+        cb?.({ totalBytesWritten: 100, totalBytesExpectedToWrite: 100 });
         if (state.downloadStatus >= 200 && state.downloadStatus < 300 && state.seed) {
           files.set(to, clone(state.seed));
         }
@@ -157,9 +172,12 @@ export const fakeDbModule = {
   },
   async closeDb() {
     state.log.push('closeDb');
+    if (state.failClose) throw new Error('close failed');
     state.open = null;
   },
   async exportUserData() {
+    state.log.push('exportUserData');
+    if (state.failExport) throw new Error('export failed');
     const db = await openDb();
     const prefs: Record<string, string> = {};
     for (const [k, v] of Object.entries(db.meta)) if (k !== 'onboarding_done') prefs[k] = v;
