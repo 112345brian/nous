@@ -251,7 +251,7 @@ export default function ArticleScreen() {
     perf.mark(slug, 'first-render');
     if (!hashes.length) { perf.end(slug); return; }
     perf.time(slug, 'math-svg-map', () => getMathSvgMap(hashes)).then(setMathSvgs).catch(() => {}).finally(() => perf.end(slug));
-  }, [nativeArticle]);
+  }, [nativeArticle, slug]);
 
   // Key on content strings (primitives) rather than the entry object so the
   // parse effect only re-fires when the AST or HTML actually changes, not on
@@ -341,9 +341,16 @@ export default function ArticleScreen() {
   const annotationsRef = useRef<Annotation[]>([]);
   annotationsRef.current = annotations;
 
+  // `load` and `handleSaveAnnotation` close over per-render state; call them
+  // through refs so effects/callbacks stay keyed on what they really depend on.
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  const saveAnnotationRef = useRef(handleSaveAnnotation);
+  saveAnnotationRef.current = handleSaveAnnotation;
+
   useEffect(() => {
     isBookmarked(slug).then(setBookmarked);
-    load();
+    loadRef.current();
   }, [slug]);
 
   // Warm a few linked articles once this one is on screen and the reader has
@@ -472,7 +479,7 @@ export default function ArticleScreen() {
       } else if (msg.type === 'backlinks') {
         nav.navigate('Graph', { centerSlug: slug, centerTitle: title });
       } else if (msg.type === 'highlight') {
-        handleSaveAnnotation(msg.text, msg.context, msg.color, null);
+        saveAnnotationRef.current(msg.text, msg.context, msg.color, null);
       } else if (msg.type === 'annotate') {
         setPendingAnnotation({ selected_text: msg.text, context: msg.context, color: msg.color });
       } else if (msg.type === 'tap_annotation') {

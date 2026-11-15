@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Text, View, Image, Pressable, type LayoutChangeEvent, type TextStyle } from 'react-native';
+import { Text, View, Image, Pressable, type TextStyle } from 'react-native';
 import type { Block, Inline } from '../types';
 import type { Annotation } from '../../../types';
 import { SvgXml } from 'react-native-svg';
@@ -7,7 +7,6 @@ import { InlineContent, InlineHandlers, hasMath, type Highlight } from './Inline
 import { SEP_COLORS, useSepTheme } from './theme';
 
 export interface BlockHandlers extends InlineHandlers {
-  onHeadingLayout?: (id: string, y: number) => void;
   renderFallback?: (html: string) => React.ReactNode;
   resolveImageSrc?: (src: string) => string | null;
   annotations?: Annotation[];
@@ -116,11 +115,8 @@ export const BlockView = React.memo(function BlockView({ block, h, suppressTopBo
       const marginStyle = (suppressTopBorder && block.level === 2)
         ? [margin, { borderTopWidth: 0, marginTop: 16, paddingTop: 8 }]
         : margin;
-      const onLayout = block.id && h.onHeadingLayout
-        ? (e: LayoutChangeEvent) => h.onHeadingLayout!(block.id!, e.nativeEvent.layout.y)
-        : undefined;
       return (
-        <View style={marginStyle} onLayout={onLayout}>
+        <View style={marginStyle}>
           <InlineContent inlines={block.children} handlers={h} baseStyle={style} />
         </View>
       );
