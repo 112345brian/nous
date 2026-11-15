@@ -29,6 +29,7 @@ jest.mock('../db', () => ({
   getEntryHtml: jest.fn(async (slug: string) => mockEntries[slug]?.content_html ?? null),
   putMathBatch: jest.fn(async () => {}),
   getMathSvgMap: jest.fn(async () => ({})),
+  getMathByHashes: jest.fn(async () => []),
   setEntryNotes: jest.fn(),
 }));
 
@@ -38,6 +39,7 @@ jest.mock('../mathRender', () => ({
 }));
 
 import * as db from '../db';
+import { _resetMathCacheState } from '../mathCache';
 import {
   fetchAndCacheArticle,
   onMathReady,
@@ -60,6 +62,7 @@ function deferred<T>() {
 const flush = () => new Promise<void>(r => setTimeout(r, 0));
 
 beforeEach(() => {
+  _resetMathCacheState();
   jest.clearAllMocks();
   for (const k of Object.keys(mockMeta)) delete mockMeta[k];
   for (const k of Object.keys(mockEntries)) delete mockEntries[k];

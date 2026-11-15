@@ -27,6 +27,7 @@ jest.mock('../db', () => ({
   putMathBatch: jest.fn(async () => {}),
   putMath: jest.fn(async () => {}),
   getMathSvgMap: jest.fn(async () => ({})),
+  getMathByHashes: jest.fn(async () => []),
   setEntryNotes: jest.fn(),
 }));
 
@@ -34,6 +35,7 @@ const mockRender = jest.fn();
 jest.mock('../mathRender', () => ({ renderMathBatch: (...a: unknown[]) => mockRender(...a) }));
 
 import * as db from '../db';
+import { _resetMathCacheState } from '../mathCache';
 import { backfillMathInline, downloadAll, syncCachedArticles } from '../catalog';
 
 const okRender = async (items: Array<{ tex: string; display: boolean }>) =>
@@ -43,6 +45,7 @@ const PAGE = `<html><head><title>T (Stanford Encyclopedia of Philosophy)</title>
 <body><div id="aueditable"><h1>T</h1><p>Let \\(x\\) be.</p></div></body></html>`;
 
 beforeEach(() => {
+  _resetMathCacheState();
   jest.clearAllMocks();
   for (const k of Object.keys(mockMeta)) delete mockMeta[k];
   for (const k of Object.keys(mockEntries)) delete mockEntries[k];
@@ -85,7 +88,11 @@ describe('backfillMathInline', () => {
       { slug: 'a', content_html: '<p>\\(a\\)</p>' },
       { slug: 'b', content_html: '<p>\\(b\\)</p>' },
     ];
-    mockRender.mockRejectedValueOnce(new Error('boom'));
+    // 'a' always fails (a single failure is now retried once, see mathCache.ts).
+    mockRender.mockImplementation(async (items: Array<{ tex: string; display: boolean }>) => {
+      if (items.some(i => i.tex === 'a')) throw new Error('boom');
+      return okRender(items);
+    });
     await backfillMathInline();
     expect(mockEntries.a.content_html).toBe('<p>\\(a\\)</p>');
     expect(mockEntries.b.content_html).toContain('<math-i ');

@@ -1,25 +1,11 @@
 import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getSlugsByCacheStatus, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, getMathArticleHtml, updateArticleHtml, setArticleAst, getUncachedAstSlugs, getEntryHtml, putMath, putMathBatch, getMathSvgMap, setEntryNotes } from './db';
 import { linkifyHtml } from '../utils/linkifier';
 import seedEntries from '../assets/entry-seed.json';
-import { renderMathChunked } from './mathChunked';
+import { ensureMath } from './mathCache';
+import { mathHash, hash64 } from '../utils/mathKey';
 import { mathSlice, watchStalls, yieldThenMathMayRun, withDownloadHold, MathPriority } from './mathPriority';
 import { parseSepHtml } from '../utils/sepHtml/parse';
 import { perf } from '../utils/perf';
-
-// 64-bit hash of a TeX equation (or SVG bytes) + display flag. Two independent
-// djb2-xor passes with different seeds; birthday collision at ~2^32 unique inputs
-// vs. the ~65k bound of a 32-bit hash, making collisions essentially impossible
-// across the SEP corpus. Existing 8-char hashes (32-bit) in the DB remain valid.
-function mathHash(input: string, display: boolean): string {
-  let h1 = 5381, h2 = 52711;
-  const s = input + (display ? '\x01' : '\x00');
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    h1 = (((h1 << 5) + h1) ^ c) >>> 0;
-    h2 = (((h2 << 5) + h2) ^ c) >>> 0;
-  }
-  return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
-}
 
 // Replace all \(…\) and \[…\] TeX math in the raw HTML with compact <math-i>
 // placeholder elements. `priority` null = the caller already owns the schedule (the
@@ -43,28 +29,25 @@ async function substitutemath(html: string, priority: MathPriority | null = 'cur
   }
   if (!spots.length) return html;
 
-  const results = await renderMathChunked(spots.map(s => ({ tex: s.tex, display: s.display })), { priority });
+  // Dedupe, look up what the math table already holds, render only the missing
+  // unique equations (each chunk stored before the next is requested). If any
+  // equation is still missing (renderer timed out), leave the article untouched
+  // and pending; rewriting is the idempotent last step and needs no rendering.
+  const { dims, complete } = await ensureMath(spots.map(s => ({ tex: s.tex, display: s.display })), priority);
+  if (!complete) return html;
   const slice = mathSlice(priority);
 
   let out = html;
-  const rows: Array<{ hash: string; svg: string; w: number; h: number; display: boolean }> = [];
   for (let i = spots.length - 1; i >= 0; i--) {
     await slice.checkpoint(); // yield the JS thread when this slice's time budget is spent
-    const r = results[i];
-    if (!r || r.error || !r.b64) continue;
     const { index, len, display, tex } = spots[i];
     const hash = mathHash(tex, display);
-    const w = (r.w ?? 1).toFixed(4);
-    const h = (r.h ?? 1).toFixed(4);
-    rows.push({ hash, svg: atob(r.b64), w: r.w ?? 1, h: r.h ?? 1, display });
+    const d = dims.get(hash);
+    if (!d) continue; // unrenderable TeX stays as raw text
     // Tiny placeholder — no base64 in HTML.
-    const tag = `<math-i hash="${hash}" d="${display ? '1' : '0'}" w="${w}" h="${h}"></math-i>`;
+    const tag = `<math-i hash="${hash}" d="${display ? '1' : '0'}" w="${d.w.toFixed(4)}" h="${d.h.toFixed(4)}"></math-i>`;
     out = out.slice(0, index) + tag + out.slice(index + len);
   }
-  // Store SVGs in the math table in one transaction (idempotent on hash). Done
-  // before the caller writes the substituted HTML, so no placeholder can ever
-  // reference a missing row.
-  await putMathBatch(rows);
   return out;
 }
 
@@ -182,7 +165,7 @@ export async function backfillMathHashFormat(): Promise<void> {
           const h = parseFloat(hMatch?.[1] ?? '1') || 1;
           // Hash SVG content (TeX unavailable here). Uses the same 64-bit djb2
           // as mathHash so the key space matches newly-fetched articles.
-          const hash = mathHash(svg, display);
+          const hash = hash64(svg, display);
           puts.push(putMath(hash, svg, w, h, display));
           changed = true;
           return `<math-i hash="${hash}" d="${display ? '1' : '0'}" w="${w.toFixed(4)}" h="${h.toFixed(4)}"></math-i>`;

@@ -17,7 +17,7 @@ jest.mock('../src/services/db', () => ({
   getSlugsByCacheStatus: async () => ({ uncached: [], cached: [] }), getCachedSlugs: async () => [],
   indexLinks: async () => {}, getAllEntryTitles: async () => [], invalidateLinkCache() {},
   cleanDenormalizedTitles() {}, getMathArticleHtml: async () => [], getUncachedAstSlugs: async () => [],
-  getMathSvgMap: async () => ({}), setEntryNotes() {},
+  getMathSvgMap: async () => ({}), getMathByHashes: async () => [], setEntryNotes() {},
 }));
 
 const mockN = Number((globalThis as any).process.env.BENCH_EQ ?? 400);

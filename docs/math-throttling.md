@@ -36,11 +36,12 @@ starts when the article finished opening / the download finished.
   `chunkSize: Infinity` is the old single batch. `priority: null` = ungated, used only by the
   `awaitMath` path of `syncCachedArticles`, which already runs under its own download hold
   (gating would deadlock).
+* `src/utils/mathKey.ts`, `src/services/mathCache.ts`: key, dedupe, chunk persistence (below).
 * `src/services/mathPriority.ts`: singleton wiring: `whenMathMayRun`, `yieldThenMathMayRun`,
   `withDownloadHold`, `mathSlice` (time-sliced loops) and the dev-only `watchStalls`.
 * `src/utils/stallDetector.ts`: dev-only JS-thread stall detector (timer lateness).
-* `catalog.ts` changes are small: `substitutemath(html, priority)` uses the chunked renderer
-  and a slice checkpoint in its splice loop; `completeArticleMath(slug, html?, priority)`;
+* `catalog.ts` changes are small: `substitutemath(html, priority)` calls `ensureMath` and keeps only the splice loop
+  (with a slice checkpoint); `completeArticleMath(slug, html?, priority)`;
   `resumePendingMath`, `backfillMathInline`, `backfillAst` do one article per unit with
   `await yieldThenMathMayRun('background')` between units; `downloadAll` /
   `syncCachedArticles` are wrapped in `withDownloadHold`.
@@ -56,10 +57,75 @@ Nothing is removed from a queue when paused. Current-article math is recorded in
 the first unfinished article. `backfillMathInline` now re-reads each article's HTML right
 before processing (its start-of-run snapshot can be hours old when paused).
 
-Resume granularity is the **article**: a kill in the middle of one large article loses that
-article's in-flight equations, which re-render from scratch next launch. Persisting each
-chunk's SVGs and skipping already-stored hashes on resume would fix that; it was left out
-because it needs a change inside `substitutemath`, which `tiered-math` rewrites.
+## Dedupe and crash safety (the `math` table is the progress record)
+
+`src/utils/mathKey.ts` (pure) defines the table key: `mathHash(tex, display)` =
+`hash64(normalizeTex(tex), display)`, where normalization only trims and collapses whitespace
+runs (braces and commands are untouched: `x_1` and `x_{1}` stay separate). `catalog.ts`
+imports it; `hash64` is also what `backfillMathHashFormat` uses on raw SVG bytes, unchanged.
+
+`src/services/mathCache.ts` `ensureMath(spots, priority)` is the one function both the first
+render and a resume go through:
+
+1. hash every spot and dedupe by hash;
+2. look up which hashes the `math` table already has (`getMathByHashes`, in IN lists of 400);
+3. send only the missing unique equations to the WebView, in chunks of 24;
+4. **write each chunk to the table in its own transaction (`putMathBatch`) before the next
+   chunk is requested** (`renderMathChunked`'s `onChunk`, awaited);
+5. return `complete` once every hash is stored or was rejected by MathJax as bad TeX.
+
+Finalization is separate and idempotent (`substitutemath` rewrite, then `completeArticleMath`
+writes `content_html`, re-derives the AST and clears `math_pending`). It runs only when
+`complete` is true and renders nothing if everything is stored. There is no progress counter:
+what is in the table is what is done.
+
+Guarantees:
+* A force stop or crash loses at most the chunk in flight: **24 equations** of MathJax work
+  (a chunk's SVGs are not in the table until its transaction commits). Resume renders only
+  the hashes still missing, never one already stored.
+* A kill between the last chunk and finalization resumes with finalization only (zero
+  rendering). Finalization writes `content_html` after the SVG rows exist, as before, so no
+  placeholder can reference a missing row.
+* A chunk that throws, returns short or times out leaves only its hashes missing; the other
+  chunks are stored and other articles proceed. Retries are bounded in memory
+  (`MAX_RENDER_ATTEMPTS = 2` per equation per app run, one extra pass inside the same call);
+  after that the article stays in `math_pending` until the next launch, which gets fresh
+  attempts. TeX that MathJax itself rejects is remembered for the run, left as raw text, and
+  does not hold the article pending.
+* A fully timed-out chunk (engine presumed hung) skips the remaining chunks of that pass
+  instead of waiting 30 s per chunk.
+
+Limits:
+* Chunk size 24 is the loss window and the cancel window. Smaller means less lost work but
+  more transactions and bridge messages (12 would double both); 24 sits in the 20-40 target.
+  One constant (`chunkSize`).
+* The window is "MathJax work for one chunk", not data: the article text and `math_pending`
+  were already durable.
+* Retry counters and the bad-TeX set are not persisted, so an equation the renderer can
+  never do costs `MAX_RENDER_ATTEMPTS` renders per launch for as long as its article is
+  pending. Rejected-TeX equations do not count (they finalize the article).
+* `putMathBatch` is the only durable write per chunk; if SQLite itself fails the error
+  propagates, the article stays pending, and nothing is half-written (one transaction).
+* Rows written under old hashes stay valid: only TeX with internal runs of whitespace gets a
+  new hash, and existing articles keep referencing their old rows. No version bump or migration
+  was written (the existing derived-content version lives in `coreMigrations.ts`, which this
+  task must not touch); re-fetched or re-rendered articles simply store the new hash.
+
+### Dedupe ratio (counts only, 4 math-heavy articles fetched by hand; pages kept outside the repo)
+
+| | count |
+|---|---|
+| equation spots in the 4 articles | 2235 |
+| unique per article (sum), whitespace-normalized | 834 |
+| unique across the 4 articles | 761 |
+| unique with trim only (old key) | 780 |
+
+So 66% of typesets disappear once repeats are deduped (63% from within-article repeats,
+a further ~3% because the articles share equations), and normalization merges 19 more.
+Per article: logic-modal 878 -> 324, set-theory 763 -> 266, computability 363 -> 176,
+model-theory 231 -> 68. Bundling pre-rendered common equations in the app is not an option
+(AGENTS.md: SEP-derived content is never bundled); the tiering branch already removes the
+most common trivial ones. Four articles is a small sample: treat the ratio as indicative.
 
 ## Constants and tuning (`DEFAULT_THROTTLE_CONFIG`)
 

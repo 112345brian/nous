@@ -13,6 +13,13 @@ export interface ChunkedOptions {
   priority: MathPriority | null;
   /** Equations per message. Infinity (or >= items.length) = the old single batch. */
   chunkSize?: number;
+  /**
+   * Awaited after each chunk's results arrive and BEFORE the next chunk is requested
+   * (the chunk is the unit of durability). Also called, with timeout results, for the
+   * remainder that is skipped after a fully timed-out chunk. If it throws, rendering
+   * stops and the error propagates.
+   */
+  onChunk?: (start: number, results: MathResult[]) => Promise<void>;
   render?: (items: MathReq[]) => Promise<MathResult[]>;
   /** Yield point before the first chunk / between chunks (injectable for tests). */
   firstGate?: (p: MathPriority) => Promise<void>;
@@ -42,11 +49,18 @@ export async function renderMathChunked(items: MathReq[], opts: ChunkedOptions):
       res = items.slice(a, b).map(it => ({ ...it, error: 'render-failed' }));
     }
     // Per-item contract: always one result per request, in order.
-    for (let i = a; i < b; i++) out.push(res[i - a] ?? { ...items[i], error: 'missing' });
+    const chunkOut: MathResult[] = [];
+    for (let i = a; i < b; i++) chunkOut.push(res[i - a] ?? { ...items[i], error: 'missing' });
+    out.push(...chunkOut);
+    await opts.onChunk?.(a, chunkOut);
     // An entirely timed-out chunk means the engine is hung: do not burn another
     // 30 s timeout per remaining chunk. The caller keeps the article pending.
     if (res.length > 0 && res.every(isTimeout)) {
-      for (let i = b; i < items.length; i++) out.push({ ...items[i], error: 'timeout' });
+      if (b < items.length) {
+        const rest = items.slice(b).map(it => ({ ...it, error: 'timeout' }));
+        out.push(...rest);
+        await opts.onChunk?.(b, rest);
+      }
       break;
     }
   }

@@ -25,12 +25,14 @@ jest.mock('../db', () => ({
   putMathBatch: jest.fn(async () => {}),
   putMath: jest.fn(async () => {}),
   getMathSvgMap: jest.fn(async () => ({})),
+  getMathByHashes: jest.fn(async () => []),
   setEntryNotes: jest.fn(),
 }));
 
 const mockRender = jest.fn();
 jest.mock('../mathRender', () => ({ renderMathBatch: (...a: unknown[]) => mockRender(...a) }));
 
+import { _resetMathCacheState } from '../mathCache';
 import { idleScheduler } from '../idleScheduler';
 import { fetchAndCacheArticle, completeArticleMath, resumePendingMath, downloadAll } from '../catalog';
 
@@ -44,6 +46,7 @@ const tick = (ms: number) => jest.advanceTimersByTimeAsync(ms);
 // clock far ahead of the previous one so that state can't leak between tests.
 let clockBase = Date.now();
 beforeEach(() => {
+  _resetMathCacheState();
   clockBase += 1e9;
   jest.useFakeTimers({ now: clockBase });
   jest.clearAllMocks();
