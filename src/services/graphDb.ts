@@ -12,18 +12,13 @@ import type * as SQLite from 'expo-sqlite';
 import { getDb } from './db';
 import { runMigrations, tableVersionStore, type Migration } from './migrations';
 import { getInfluenceWeight } from '../data/influenceWeights';
+import type { GraphNode, GraphEdge } from '../types';
+
+// Re-exported: these now live in src/types.ts (pure ring) so utils/forceLayout can use them.
+export type { GraphNode, GraphEdge };
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-export interface GraphNode {
-  slug: string; title: string; read: boolean;
-  readProgress?: number; // 0–1; ≥ 0.9 = fully read, > 0 = in progress, 0/absent = unvisited
-  // 'entry' = the centred article; 'idea'/'thinker' = InPhO nodes;
-  // 'linked' = a neighbouring entry in the SEP hyperlink graph.
-  kind?: 'entry' | 'idea' | 'thinker' | 'linked';
-  birthYear?: number | null; deathYear?: number | null; // Timeline view
-}
-export interface GraphEdge { from_slug: string; to_slug: string; weight?: number; }
 export interface GraphData { nodes: GraphNode[]; edges: GraphEdge[]; }
 
 export interface InphoNodeRow {

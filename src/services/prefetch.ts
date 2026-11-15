@@ -1,10 +1,9 @@
 // I/O edge for link prefetch. Policy (what/when/how many) lives in
 // `src/utils/prefetchPolicy.ts`; this file only wires it to NetInfo, SQLite,
-// the network (via fetchAndCacheArticle) and RN's InteractionManager.
+// the network (via the `fetchOne` it is given) and RN's InteractionManager.
 import { InteractionManager } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { getLinksFrom } from './db';
-import { fetchAndCacheArticle } from './catalog';
 import {
   PREFETCH_IDLE_DELAY_MS,
   canPrefetchOn,
@@ -21,8 +20,10 @@ const attempted = new Set<string>();
  * settled), quietly cache a few of its uncached outgoing-link targets, one at a
  * time. Math uses the deferred path at background priority: queued on math_pending, rendered when the reader is quiet, and swapped in via onMathReady if the article is open by then. Returns a
  * cancel function: call it on navigation/unmount. Never throws.
+ * `fetchOne` caches one article (the composition root passes fetchAndCacheArticle with
+ * skipMath); it is a parameter so this adapter never imports a use case.
  */
-export function startPrefetch(slug: string): () => void {
+export function startPrefetch(slug: string, fetchOne: (slug: string) => Promise<boolean>): () => void {
   let cancelled = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let interaction: { cancel: () => void } | null = null;
@@ -46,7 +47,7 @@ export function startPrefetch(slug: string): () => void {
       if (cancelled) return;
       const targets = selectPrefetchTargets(slug, links, attempted);
       await runPrefetch(targets, {
-        fetchOne: s => fetchAndCacheArticle(s, { deferPriority: 'background' }),
+        fetchOne,
         sleep,
         shouldContinue: () => !cancelled,
         onAttempt: s => { attempted.add(s); },

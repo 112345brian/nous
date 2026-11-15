@@ -61,3 +61,33 @@ export interface Annotation {
   created_at: number;
   updated_at: number;
 }
+
+export interface GraphNode {
+  slug: string; title: string; read: boolean;
+  readProgress?: number; // 0–1; ≥ 0.9 = fully read, > 0 = in progress, 0/absent = unvisited
+  // 'entry' = the centred article; 'idea'/'thinker' = InPhO nodes;
+  // 'linked' = a neighbouring entry in the SEP hyperlink graph.
+  kind?: 'entry' | 'idea' | 'thinker' | 'linked';
+  birthYear?: number | null; deathYear?: number | null; // Timeline view
+}
+export interface GraphEdge { from_slug: string; to_slug: string; weight?: number; }
+
+/** One row of the entry index (title list): what the index page and the bundled seed provide. */
+export interface IndexEntry {
+  slug: string;
+  title: string;
+  parent_label?: string | null;
+}
+
+/** Which part of the library an operation covers: SEP entries, OWL entries, or both. */
+export type LibraryScope = 'all' | 'sep' | 'owl';
+
+/** An entry as the download and sync loops see it. */
+export interface EntryRef { slug: string; title: string }
+
+/** Progress of a bulk download or sync. */
+export type DownloadProgress = {
+  done: number;
+  total: number;
+  current: string;
+};

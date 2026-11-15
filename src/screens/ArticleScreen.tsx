@@ -17,9 +17,8 @@ import {
   getMeta, setReadProgress, getLinksTo, indexLinks, getRecentSlugs, getMathSvgMap,
 } from '../services/db';
 import { makeExcerpt } from '../utils/excerpt';
-import { fetchAndCacheArticle, ensureNotesCached, onMathReady } from '../services/catalog';
-import { perf } from '../utils/perf';
-import { startPrefetch } from '../services/prefetch';
+import { fetchAndCacheArticle, onMathReady, ensureNotesCached, startPrefetch } from '../composition';
+import { perf } from '../services/perf';
 import { primeBackfillForSlugs, primeGraphLayouts } from '../services/inpho';
 import { idleScheduler } from '../services/idleScheduler';
 import { buildArticleHtml } from '../utils/articleTemplate';

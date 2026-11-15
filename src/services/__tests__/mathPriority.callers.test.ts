@@ -43,9 +43,10 @@ test('every yield point is awaited (a discarded promise would not pause anything
 });
 
 test('bulk-download entry points take a download hold; seed import call sites do too', () => {
-  const catalog = fs.readFileSync(path.join(SRC, 'services/catalog.ts'), 'utf8');
-  expect(catalog).toMatch(/export function downloadAll[\s\S]*?withDownloadHold/);
-  expect(catalog).toMatch(/export function syncCachedArticles[\s\S]*?withDownloadHold/);
+  // The two wrappers live in the composition root (the use cases are in src/core).
+  const root = fs.readFileSync(path.join(SRC, 'composition.ts'), 'utf8');
+  expect(root).toMatch(/export function downloadAll[\s\S]*?withDownloadHold/);
+  expect(root).toMatch(/export function syncCachedArticles[\s\S]*?withDownloadHold/);
   for (const f of [path.join(ROOT, 'App.tsx'), path.join(SRC, 'screens/SettingsScreen.tsx')]) {
     const t = fs.readFileSync(f, 'utf8');
     const calls = t.match(/importSeedFromUrl\(/g) ?? [];

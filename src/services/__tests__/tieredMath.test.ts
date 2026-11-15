@@ -38,7 +38,7 @@ jest.mock('../mathRender', () => ({
 }));
 
 import * as db from '../db';
-import { completeArticleMath } from '../catalog';
+import { completeArticleMath } from '../../composition';   // wired in the composition root
 import { partitionAnnotations } from '../../utils/annotationValidity';
 import { reanchorAll } from '../../utils/reanchor';
 

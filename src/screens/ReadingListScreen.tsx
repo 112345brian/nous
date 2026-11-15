@@ -11,7 +11,7 @@ import {
   getAnnotationsForSlug,
 } from '../services/db';
 import type { BookmarkRow } from '../services/db';
-import { exportToZotero } from '../services/dataSync';
+import { exportToZotero } from '../composition';
 import type { RootStackParamList } from '../../App';
 import { colors, themedStyles } from '../theme/tokens';
 

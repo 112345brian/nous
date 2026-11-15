@@ -116,21 +116,40 @@ missing behavior, see section 4.
 
 ## 3. Ports the use cases need
 
-These are the outbound interfaces to define. Each is currently a direct import of a
-concrete library or module.
+These are the outbound interfaces, as they exist in `src/core/ports.ts`. Each use case in
+`src/core` takes the ports it needs as a parameter and never imports an adapter; the adapters
+live in `src/services`, and `src/composition.ts` is the one place that builds them and hands
+them over. Screens and `src/boot` import the wired use cases from `composition.ts`.
+(`docs/core-di-audit.md` has the audit behind this list and what is still outside the core.)
 
-| Port | Used by | Implemented today by |
+| Port (in `src/core/ports.ts`) | Used by | Implemented by (adapter) |
 |---|---|---|
-| `ArticleSource` (fetch index, article, notes) | A3, C1, C4, C7, G1, G2 | `fetch` in `catalog.ts` |
-| `MathRenderer` (TeX to SVG batch) | C1, C6 | hidden MathJax WebView (`mathRender.ts`, `MathRenderWebView`) |
-| `LibraryStore` (entries, search, links, versions) | A, B, C, G | `db.ts` (`expo-sqlite`) |
-| `UserStore` (reads, bookmarks, annotations, prefs) | C2, D, E, H | `db.ts` (same file as `LibraryStore`) |
-| `SecretStore` (API keys) | H2, E4 | none; `meta` table today |
-| `GraphSource` / `GraphStore` | F | `inpho.ts`, `graphDb.ts` |
-| `ZoteroClient` | E4 | `fetch` in `dataSync.ts` |
-| `SyncFolder` (read/write user-data file) | H3, H4, H5 | `expo-file-system` in `dataSync.ts` |
-| `ProgressNotifier` | G1 | `downloadNotification.ts` |
-| `Clock`, `Scheduler` (idle work) | A4, G2 | `Date.now`, timers, `InteractionManager` |
+| `ArticleSource` (`fetchIndexHtml`, `fetchArticleHtml`, `fetchNotesHtml`) | A3, C1, C4, C7, G2 | `services/catalog.ts` (`fetch`, 30 s abort) |
+| `LibraryIndexStore` (count, upsert entries, clean titles, all titles, invalidate link cache) | A3 | `services/db.ts` |
+| `ArticleLibrary` (`cacheArticle`, `indexLinks`) | C1, C7, G1, G2 | `services/db.ts` |
+| `NotesStore` (`setEntryNotes`) | C4 | `services/db.ts` |
+| `ArticleMathStore` (read and rewrite an article's body, store its AST) | C6 | `services/db.ts` |
+| `ArticleMath` (`substitute`: render now; `completeLater`: render in the background; `queueForLater`: record the debt only) | C1, C6, G1, G2 | `services/catalog.ts` (`substitutemath`) plus the pipeline in `core/mathCompletion.ts` |
+| `LibraryCacheStatus` (cached and uncached entries) | G1, G2 | `services/db.ts` |
+| `LibraryBackfillStore` (articles with no AST) | A4 | `services/db.ts` |
+| `KeyValueStore` (`getMeta`, `setMeta`: stamps, flags, the pending-math list) | A3, A4, C6, G2 | `services/db.ts` (`meta` table) |
+| `UserDataStore<T>` and `SyncFolder` (read and write the user-data file) | H3, H4 | `services/db.ts` and `services/expoSyncFolder.ts` (`expo-file-system`) |
+| `ZoteroHttp` (`post`) | E4 | `services/zoteroHttp.ts` (`fetch`) |
+| `StageTimer` (dev-only stage timing) | C1 | `services/perf.ts` |
+| `Clock`, `Sleep` | A3, E4, G1, G2 | `Date.now` and a timer, supplied by the root |
+| the pre-warm's own deps (`PrewarmDeps`, in `core/prewarmCommonMath.ts`) | A4 (common equations) | the root, from `mathCache.ensureMath` at background priority, the `meta` table and the idle scheduler |
+
+Not behind a port yet, and why:
+
+- **Math rendering itself** (the hidden WebView, the equation cache, the priority scheduler) is an
+  adapter with its own state. The core sees it only as the injected `substitute` and `pause`
+  functions.
+- **`GraphSource` / `GraphStore`** (F): `inpho.ts` and `graphDb.ts` are still called directly.
+- **`SecretStore`** (H2, E4): the Zotero key now lives in secure storage (`services/secureSecrets.ts`)
+  and reaches the use case as a parameter; there is no port because nothing else needs one.
+- **`ProgressNotifier`** (G1): progress reaches the caller as a callback and the download
+  notification is connected in `src/boot/useBoot.ts`.
+- **`Scheduler`**: the idle scheduler is used through `pause` and by the root, not by the core.
 
 `LibraryStore` and `UserStore` are one SQLite file today. Splitting them (content
 is replaceable, user data never is) is the clean boundary. The seed-import fix works around the shared file by exporting and restoring user data; splitting the file would remove the need.

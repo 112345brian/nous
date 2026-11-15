@@ -67,6 +67,8 @@ npx react-native run-android
 
 **Journey:** Every article open is recorded with a `from_slug` pointer. Reads are grouped into sessions by a 30-minute gap threshold. The History screen renders sessions as collapsible branching trees.
 
+**Code layout:** the app is split into rings so that the logic can run and be tested without a device. `src/utils`, `src/types.ts` and `src/data` are pure (no I/O, no clock, no network). `src/core` holds the ports (plain TypeScript interfaces in `ports.ts`) and the use cases, which take their dependencies as parameters: refreshing the index, caching an article, the deferred-math pipeline, bulk download and sync, syncing user data, Zotero export. `src/services` holds the adapters (SQLite, `fetch`, the file system, the math renderer, notifications). `src/composition.ts` is the one place that builds the adapters and hands them to the use cases; screens and `src/boot` import the wired use cases from it. Tests enforce the rules (`src/utils/__tests__/innerRing.test.ts`, `src/__tests__/compositionRoot.test.ts`), and `docs/core-di-audit.md` records what is deliberately still outside the core.
+
 ## Attribution & support
 
 Nous is an independent reader. It is **not** affiliated with, endorsed by, or sponsored by Stanford University, the Metaphysics Research Lab, Indiana University, or the SEP's editors.

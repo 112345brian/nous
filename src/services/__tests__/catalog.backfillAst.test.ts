@@ -10,7 +10,7 @@ jest.mock('../db', () => ({
 }));
 jest.mock('../mathRender', () => ({ renderMathBatch: async () => [] }));
 
-import { backfillAst } from '../catalog';
+import { backfillAst } from '../../composition';   // wired in the composition root
 
 beforeEach(() => {
   mockSetArticleAst.mockClear();

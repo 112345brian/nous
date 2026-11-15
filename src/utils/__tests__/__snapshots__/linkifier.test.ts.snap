@@ -1,0 +1,15 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`linkifyHtml (real index) empty string 1`] = `""`;
+
+exports[`linkifyHtml (real index) first mention only, case-insensitive 1`] = `"<p>The problem of <a href="/entries/freewill/" class="wl">free will</a> is old. Free will again, and FREE WILL.</p>"`;
+
+exports[`linkifyHtml (real index) longest title wins 1`] = `"<p><a href="/entries/kant/" class="wl">Kant, Immanuel</a> on ethics and Kant</p>"`;
+
+exports[`linkifyHtml (real index) no match / empty / markup only 1`] = `"<p>zzzz qqqq</p>"`;
+
+exports[`linkifyHtml (real index) skip depth recovers after the closing tag 1`] = `"<a href="/x">free will</a> and <a href="/entries/freewill/" class="wl">free will</a>"`;
+
+exports[`linkifyHtml (real index) skips a, code, pre, headings, cite, blockquote 1`] = `"<a href="/x">free will</a> <code>free will</code> <h2>free will</h2> <cite>free will</cite> <blockquote>free will</blockquote> then <a href="/entries/freewill/" class="wl">free will</a>"`;
+
+exports[`linkifyHtml (real index) tags only 1`] = `"<p></p><br/>"`;

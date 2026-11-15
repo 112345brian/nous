@@ -11,13 +11,17 @@ jest.mock('../src/services/db', () => ({
   savePrefs: jest.fn(),
 }));
 jest.mock('../src/services/seedImport', () => ({ importSeedFromUrl: jest.fn() }));
-jest.mock('../src/services/catalog', () => ({
+jest.mock('../src/services/catalog', () => ({ backfillMathHashFormat: jest.fn() }));
+// The use cases come from the composition root. The common-math pre-warm is wired there too; its
+// stand-in schedules the same task name through the (mocked) idle scheduler, as the real one does.
+jest.mock('../src/composition', () => ({
   backfillAst: jest.fn(),
-  backfillMathHashFormat: jest.fn(),
   resumePendingMath: jest.fn(),
   downloadAll: jest.fn(),
   refreshIndexIfStale: jest.fn(),
   syncCachedArticles: jest.fn(),
+  scheduleCommonMathPrewarm: jest.fn(() =>
+    require('../src/services/idleScheduler').idleScheduler.schedule('prewarm-common-math', jest.fn())),
 }));
 jest.mock('../src/services/mathRender', () => ({ preloadMathJax: jest.fn() }));
 jest.mock('../src/services/idleScheduler', () => ({ idleScheduler: { schedule: jest.fn() } }));
@@ -31,7 +35,7 @@ jest.mock('../src/services/downloadNotification', () => ({
 /* eslint-disable @typescript-eslint/no-require-imports */
 const db = require('../src/services/db');
 const seed = require('../src/services/seedImport');
-const catalog = require('../src/services/catalog');
+const root = require('../src/composition');
 const { idleScheduler } = require('../src/services/idleScheduler');
 
 const prefs = (over: object = {}) => ({ homeMode: 'search', downloadAll: false, seedUrl: '', ...over });
@@ -58,7 +62,7 @@ beforeEach(() => {
   db.getPrefs.mockResolvedValue(prefs());
   db.getEntryCount.mockResolvedValue(10);
   db.getRecentSlugs.mockResolvedValue([]);
-  catalog.refreshIndexIfStale.mockResolvedValue(undefined);
+  root.refreshIndexIfStale.mockResolvedValue(undefined);
 });
 
 test('starts in booting', () => {
@@ -77,7 +81,7 @@ test('not onboarded goes to onboarding', async () => {
 test('populated index goes straight to ready and schedules backfills', async () => {
   await mount();
   expect(result.phase).toBe('ready');
-  expect(catalog.refreshIndexIfStale).toHaveBeenCalledTimes(1);
+  expect(root.refreshIndexIfStale).toHaveBeenCalledTimes(1);
   const names = idleScheduler.schedule.mock.calls.map((c: unknown[]) => c[0]);
   expect(names).toEqual(['resume-pending-math', 'backfill-math-hash-format', 'backfill-ast', 'auto-deep-sync', 'prewarm-common-math']);
 });
@@ -85,7 +89,7 @@ test('populated index goes straight to ready and schedules backfills', async () 
 test('empty index goes through indexing to ready', async () => {
   db.getEntryCount.mockResolvedValueOnce(0).mockResolvedValueOnce(5);
   let release!: () => void;
-  catalog.refreshIndexIfStale.mockReturnValue(new Promise<void>(r => { release = () => r(); }));
+  root.refreshIndexIfStale.mockReturnValue(new Promise<void>(r => { release = () => r(); }));
   await mount();
   expect(result.phase).toBe('indexing');
   await ReactTestRenderer.act(async () => { release(); });
@@ -100,7 +104,7 @@ test('empty index that stays empty is index_error', async () => {
 
 test('index refresh failure on empty index is index_error', async () => {
   db.getEntryCount.mockResolvedValue(0);
-  catalog.refreshIndexIfStale.mockRejectedValue(new Error('offline'));
+  root.refreshIndexIfStale.mockRejectedValue(new Error('offline'));
   await mount();
   expect(result.phase).toBe('index_error');
 });
@@ -113,7 +117,7 @@ test('unexpected boot failure is index_error', async () => {
 
 test('background failures after ready do not revert the phase', async () => {
   db.getPrefs.mockResolvedValue(prefs({ downloadAll: true }));
-  catalog.downloadAll.mockRejectedValue(new Error('net'));
+  root.downloadAll.mockRejectedValue(new Error('net'));
   await mount();
   await flush();
   expect(result.phase).toBe('ready');

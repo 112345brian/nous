@@ -4,13 +4,14 @@ const fs = require('fs');
 const path = require('path');
 
 const mockEnsure = jest.fn();
-jest.mock('../db', () => ({ getMeta: jest.fn(), setMeta: jest.fn() }));
-jest.mock('../mathCache', () => ({ ensureMath: (...a: unknown[]) => mockEnsure(...a) }));
-jest.mock('../idleScheduler', () => ({ idleScheduler: { schedule: jest.fn() } }));
+jest.mock('../services/db', () => ({ getMeta: jest.fn(), setMeta: jest.fn() }));
+jest.mock('../services/mathCache', () => ({ ensureMath: (...a: unknown[]) => mockEnsure(...a) }));
+jest.mock('../services/idleScheduler', () => ({ idleScheduler: { schedule: jest.fn() } }));
 
-import { scheduleCommonMathPrewarm, realPrewarmDeps } from '../commonMathWiring';
+import { scheduleCommonMathPrewarm, realPrewarmDeps } from '../composition';
 
-describe('commonMathWiring', () => {
+// The wiring now lives in the composition root (it used to be services/commonMathWiring.ts).
+describe('common-math pre-warm wiring', () => {
   it('schedules exactly one idle task under a stable key', () => {
     const schedule = jest.fn(() => true);
     scheduleCommonMathPrewarm({ schedule }, realPrewarmDeps());
@@ -25,7 +26,7 @@ describe('commonMathWiring', () => {
   });
 
   it('source guard: only ensureMath(..., "background") is used for the pre-warm', () => {
-    const src = fs.readFileSync(path.join(__dirname, '..', 'commonMathWiring.ts'), 'utf8').replace(/\/\/.*$/gm, '');
+    const src = fs.readFileSync(path.join(__dirname, '..', 'composition.ts'), 'utf8').replace(/\/\/.*$/gm, '');
     expect(src.match(/ensureMath\(/g)?.length).toBe(1);
     expect(src).toMatch(/ensureMath\(spots, 'background'\)/);
     expect(src).not.toMatch(/renderMathBatch|renderMathChunked/);

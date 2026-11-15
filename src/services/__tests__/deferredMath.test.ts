@@ -40,12 +40,7 @@ jest.mock('../mathRender', () => ({
 
 import * as db from '../db';
 import { _resetMathCacheState } from '../mathCache';
-import {
-  fetchAndCacheArticle,
-  onMathReady,
-  completeArticleMath,
-  resumePendingMath,
-} from '../catalog';
+import { fetchAndCacheArticle, onMathReady, completeArticleMath, resumePendingMath } from '../../composition';   // wired in the composition root
 
 const PAGE = `<html><head><title>Logic (Stanford Encyclopedia of Philosophy)</title></head>
 <body><div id="aueditable"><h1>Logic</h1><p>Let \\(x\\) be a set and \\[y = 2\\] hold.</p></div></body></html>`;

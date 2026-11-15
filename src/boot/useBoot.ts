@@ -3,10 +3,10 @@ import { getEntryCount, getMeta, getPrefs, getRecentSlugs, savePrefs } from '../
 import type { Prefs } from '../services/db';
 import { importSeedFromUrl } from '../services/seedImport';
 import type { SeedPhase } from '../services/seedImport';
-import { backfillAst, backfillMathHashFormat, resumePendingMath, downloadAll, refreshIndexIfStale, syncCachedArticles } from '../services/catalog';
+import { backfillMathHashFormat } from '../services/catalog';
+import { backfillAst, resumePendingMath, downloadAll, refreshIndexIfStale, syncCachedArticles, scheduleCommonMathPrewarm } from '../composition';
 import { preloadMathJax } from '../services/mathRender';
 import { idleScheduler } from '../services/idleScheduler';
-import { scheduleCommonMathPrewarm } from '../services/commonMathWiring';
 import { withDownloadHold } from '../services/mathPriority';
 import { startDownloadNotification, updateDownloadNotification, finishDownloadNotification } from '../services/downloadNotification';
 

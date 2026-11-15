@@ -38,7 +38,7 @@ jest.mock('../src/services/mathRender', () => ({
 }));
 
 const performance: { now(): number } = (globalThis as any).performance;
-import { completeArticleMath } from '../src/services/catalog';
+import { completeArticleMath } from '../src/composition';
 import { createStallDetector } from '../src/utils/stallDetector';
 
 const para = (i: number) => `<p>Paragraph ${i} of a hand-written fixture with \\(x_{${i}}\\) inline and some filler words to give the parser work.</p>`;

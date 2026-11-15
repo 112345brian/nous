@@ -35,7 +35,7 @@ const mockRender = jest.fn();
 jest.mock('../mathRender', () => ({ renderMathBatch: (...a: unknown[]) => mockRender(...a) }));
 
 import { _resetMathCacheState } from '../mathCache';
-import { fetchAndCacheArticle, resumePendingMath, downloadAll, syncCachedArticles } from '../catalog';
+import { fetchAndCacheArticle, resumePendingMath, downloadAll, syncCachedArticles } from '../../composition';   // wired in the composition root
 
 const okRender = async (items: Array<{ tex: string; display: boolean }>) =>
   items.map(it => ({ ...it, b64: btoa('<svg/>'), w: 2, h: 1 }));

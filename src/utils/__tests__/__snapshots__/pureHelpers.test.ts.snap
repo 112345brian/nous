@@ -1,0 +1,7 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`contentHash pinned value 1`] = `"c6562767"`;
+
+exports[`mathHash pinned values (stored hashes in users DBs depend on these) 1`] = `"0059717d036be29f"`;
+
+exports[`mathHash pinned values (stored hashes in users DBs depend on these) 2`] = `"5ed3bbe94923088b"`;

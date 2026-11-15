@@ -34,7 +34,7 @@ jest.mock('../db', () => ({
 const mockRender = jest.fn();
 jest.mock('../mathRender', () => ({ renderMathBatch: (...a: unknown[]) => mockRender(...a) }));
 
-import { completeArticleMath } from '../catalog';
+import { completeArticleMath } from '../../composition';   // wired in the composition root
 import { ensureMath, _resetMathCacheState } from '../mathCache';
 import { mathHash } from '../../utils/mathKey';
 

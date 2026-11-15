@@ -34,7 +34,8 @@ jest.mock('../mathRender', () => ({ renderMathBatch: (...a: unknown[]) => mockRe
 
 import { _resetMathCacheState } from '../mathCache';
 import { idleScheduler } from '../idleScheduler';
-import { fetchAndCacheArticle, completeArticleMath, resumePendingMath, downloadAll } from '../catalog';
+import { fetchAndCacheArticle, completeArticleMath, resumePendingMath } from '../../composition';   // wired in the composition root
+import { downloadAll } from '../../composition';   // moved to the composition root
 
 const okRender = async (items: Array<{ tex: string; display: boolean }>) =>
   items.map(it => ({ ...it, b64: btoa('<svg/>'), w: 2, h: 1 }));
@@ -72,7 +73,7 @@ test('reading hold: article text is cached and math stays recorded as pending, u
 });
 
 test('prefetch path (deferPriority background): queued, held while reading, then rendered and announced', async () => {
-  const { onMathReady } = require('../catalog');
+  const { onMathReady } = require('../../composition');
   const ready = jest.fn();
   const off = onMathReady(ready);
   const release = idleScheduler.hold('reading'); // user opened the prefetched article
