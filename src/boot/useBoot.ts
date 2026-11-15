@@ -3,7 +3,7 @@ import { getEntryCount, getMeta, getPrefs, getRecentSlugs, savePrefs } from '../
 import type { Prefs } from '../services/db';
 import { importSeedFromUrl } from '../services/seedImport';
 import type { SeedPhase } from '../services/seedImport';
-import { backfillAst, backfillMathHashFormat, backfillMathInline, downloadAll, refreshIndexIfStale, syncCachedArticles } from '../services/catalog';
+import { backfillAst, backfillMathHashFormat, resumePendingMath, downloadAll, refreshIndexIfStale, syncCachedArticles } from '../services/catalog';
 import { preloadMathJax } from '../services/mathRender';
 import { idleScheduler } from '../services/idleScheduler';
 import { withDownloadHold } from '../services/mathPriority';
@@ -62,12 +62,12 @@ export function useBoot(openArticle: (slug: string, title: string) => void): Boo
         }).catch(() => {});
       }
 
-      // Preload MathJax eagerly only if the math backfill hasn't completed yet
-      // (meaning there are cached articles whose TeX still needs SVG rendering)
+      // Preload MathJax eagerly only if the math queue is non-empty
+      // (meaning math_pending lists articles whose TeX still needs SVG rendering)
       // or if a bulk download is about to bring in new articles that will need it.
       // Otherwise let it load lazily on first use — no point paying boot cost.
-      const mathDone = await getMeta('math_inline_v2');
-      if (!mathDone || prefs.downloadAll) preloadMathJax();
+      const mathPending = ((await getMeta('math_pending')) ?? '[]') !== '[]';
+      if (mathPending || prefs.downloadAll) preloadMathJax();
 
       if (prefs.downloadAll) {
         await startDownloadNotification();
@@ -82,7 +82,7 @@ export function useBoot(openArticle: (slug: string, title: string) => void): Boo
       // Heavy catch-up work runs one task at a time, only while the reader is idle
       // (and never while an article is opening or scrolling). The scheduler swallows
       // task errors, so nothing here can reach boot().catch().
-      idleScheduler.schedule('backfill-math-inline', backfillMathInline);
+      idleScheduler.schedule('resume-pending-math', resumePendingMath);
       idleScheduler.schedule('backfill-math-hash-format', backfillMathHashFormat);
       idleScheduler.schedule('backfill-ast', backfillAst);
       idleScheduler.schedule('auto-deep-sync', async () => {

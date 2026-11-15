@@ -31,7 +31,7 @@ async function applyMathTierStamp(db: SQLite.SQLiteDatabase): Promise<void> {
       `UPDATE entries SET content_html = NULL, preamble_html = NULL, toc_html = NULL, notes_html = NULL,
        content_ast = NULL, excerpt = NULL, cached_at = NULL WHERE cached_at IS NOT NULL`
     );
-    await db.runAsync(`DELETE FROM meta WHERE key IN ('math_pending', 'math_inline_v2', 'math_hash_format_v1')`);
+    await db.runAsync(`DELETE FROM meta WHERE key IN ('math_pending', 'math_hash_format_v1')`);
   }
   await db.runAsync(`INSERT OR REPLACE INTO meta (key, value) VALUES ('math_tier_stamp', ?)`, [tierStamp]);
 }
@@ -208,7 +208,7 @@ export async function getMathArticleHtml(): Promise<Array<{ slug: string; conten
   return rows;
 }
 
-// Overwrite content_html and clear AST for a single entry. Used by backfillMathInline.
+// Overwrite content_html and clear AST for a single entry. Used by the math pipeline.
 // AST is cleared so ArticleScreen falls back to parseSepHtml; backfillAst re-populates it.
 export async function updateArticleHtml(slug: string, html: string): Promise<void> {
   const db = await getDb();
@@ -608,13 +608,10 @@ export async function clearArticleCache(): Promise<void> {
   await db.runAsync(
     'UPDATE entries SET content_html = NULL, toc_html = NULL, preamble_html = NULL, cached_at = NULL'
   );
-  // Clear backfill flags so they re-run against the fresh downloads on next launch.
-  // Without this, articles re-downloaded with skipMath:true would be permanently
-  // stored with raw TeX because backfillMathInline sees the flag and returns early.
+  // Clear the backfill flag so it re-runs against the fresh downloads on next launch.
   await db.runAsync(
-    "DELETE FROM meta WHERE key IN ('math_inline_v2', 'math_hash_format_v1')"
+    "DELETE FROM meta WHERE key IN ('math_hash_format_v1')"
   );
-  metaCache.delete('math_inline_v2');
   metaCache.delete('math_hash_format_v1');
 }
 

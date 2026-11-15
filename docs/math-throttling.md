@@ -13,7 +13,7 @@ while something more important is happening, and resume afterwards.
 | 1 | reading | opening/rendering an article; scroll, touch | `idleScheduler.hold('reading')` in `ArticleScreen.load()`; `noteActivity()` from `SepArticle` scroll and the WebView `progress` message | never while a hold is active; then not until the quiet gap has passed |
 | 2 | download | `downloadAll`, `syncCachedArticles`, seed import | `idleScheduler.hold('download')` via `withDownloadHold` (catalog.ts; App.tsx and SettingsScreen call sites for seed import) | never while one is running (all math is fully paused, current article included) |
 | 3 | current | math of the article on screen (`completeArticleMath` default) | gate `whenMayRun('current')` | no hold, and 400 ms since the last activity |
-| 4 | background | `backfillMathInline`, `resumePendingMath`, `backfillAst` | gate `whenMayRun('background')` | no hold, and 1500 ms since the last activity |
+| 4 | background | `resumePendingMath`, `backfillAst` | gate `whenMayRun('background')` | no hold, and 1500 ms since the last activity |
 
 Holds are counted per kind; releasing a hold counts as activity, so the quiet gap
 starts when the article finished opening / the download finished.
@@ -42,7 +42,7 @@ starts when the article finished opening / the download finished.
 * `src/utils/stallDetector.ts`: dev-only JS-thread stall detector (timer lateness).
 * `catalog.ts` changes are small: `substitutemath(html, priority)` calls `ensureMath` and keeps only the splice loop
   (with a slice checkpoint); `completeArticleMath(slug, html?, priority)`;
-  `resumePendingMath`, `backfillMathInline`, `backfillAst` do one article per unit with
+  `resumePendingMath`, `backfillAst` do one article per unit with
   `await yieldThenMathMayRun('background')` between units; `downloadAll` /
   `syncCachedArticles` are wrapped in `withDownloadHold`.
 * `ArticleScreen`: the `onMathReady` listener waits for `whenMayRun('current')` before the
@@ -52,10 +52,9 @@ starts when the article finished opening / the download finished.
 
 Nothing is removed from a queue when paused. Current-article math is recorded in
 `math_pending` before it starts (unchanged) and removed only on success;
-`resumePendingMath` walks that list one article per unit. `backfillAst` and
-`backfillMathInline` re-derive their work list from the DB, so a kill mid-way resumes at
-the first unfinished article. `backfillMathInline` now re-reads each article's HTML right
-before processing (its start-of-run snapshot can be hours old when paused).
+`resumePendingMath` walks that list one article per unit. `backfillAst`
+re-derives their work list from the DB, so a kill mid-way resumes at
+the first unfinished article.
 
 ## Dedupe and crash safety (the `math` table is the progress record)
 
@@ -194,22 +193,18 @@ detector also counts a stall still running when it stops.
   patching by hash (or position) instead, and the viewport-to-equation mapping from the native
   renderer; that touches `substitutemath` (tiered-math) and `core/mathCompletion.ts`
   (pure-core-no-io), so it was left for after those merge.
-* `backfillMathInline` still loads every math article's HTML at once (`getMathArticleHtml`)
-  and sets `math_inline_v2` even if the renderer timed out for some articles (existing
-  behavior, not changed here).
 * `backfillAst` and the per-article `parseSepHtml` cannot be sliced inside; one article is
   the smallest unit.
 
-## Related gap (not fixed here)
+## skipMath articles (fixed)
 
-Articles bulk-downloaded with `skipMath: true` after the one-shot `math_inline_v2` flag is set
-never get math, because nothing adds them to `math_pending`. This design makes the fix easy:
-`resumePendingMath` is now the single paced, resumable consumer of `math_pending`, so
-`downloadAll` only needs to add each `skipMath` article that `has_math` to that list
-(`updatePending(s => s.add(slug))`, as `fetchAndCacheArticle` already does for the deferred
-path) and it will be rendered at background priority. A test in
-`catalog.backfillMathInline.test.ts` pins the current behavior ("known gap") and will need to
-change with that fix.
+Every article cached with TeX but without rendering (`skipMath`, i.e. `downloadAll`) is added to
+`math_pending` by `fetchAndCacheArticle` and rendered later by `resumePendingMath` at background
+priority. `downloadAll` starts that drain only after its download hold is released. The one-shot
+`math_inline_v2` flag and `backfillMathInline` were removed; App.tsx schedules `resumePendingMath`
+at launch. Prefetch uses the deferred path with `deferPriority: 'background'` (queued on
+`math_pending`, rendered when the reader is quiet, `onMathReady` swaps it in if already open),
+chosen over an ArticleScreen change because it touches no UI code.
 
 ## Merge notes
 

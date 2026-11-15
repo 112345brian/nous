@@ -1,4 +1,4 @@
-// backfillMathInline / downloadAll / syncCachedArticles as callers of the math
+// resumePendingMath / downloadAll / syncCachedArticles as callers of the math
 // pipeline. Pins current behavior before the priority model changes how they
 // pace themselves. Hand-written fixtures only.
 
@@ -34,9 +34,8 @@ jest.mock('../db', () => ({
 const mockRender = jest.fn();
 jest.mock('../mathRender', () => ({ renderMathBatch: (...a: unknown[]) => mockRender(...a) }));
 
-import * as db from '../db';
 import { _resetMathCacheState } from '../mathCache';
-import { backfillMathInline, downloadAll, syncCachedArticles } from '../catalog';
+import { fetchAndCacheArticle, resumePendingMath, downloadAll, syncCachedArticles } from '../catalog';
 
 const okRender = async (items: Array<{ tex: string; display: boolean }>) =>
   items.map(it => ({ ...it, b64: btoa('<svg/>'), w: 2, h: 1 }));
@@ -54,58 +53,68 @@ beforeEach(() => {
   (globalThis as any).fetch = jest.fn(async () => ({ ok: true, text: async () => PAGE }));
 });
 
-describe('backfillMathInline', () => {
-  test('finishes pending math first, rewrites each article, then sets the one-shot flag', async () => {
+describe('resumePendingMath (launch drain)', () => {
+  test('finishes pending math and clears the list', async () => {
     mockMeta.math_pending = JSON.stringify(['p']);
     mockEntries.p = { content_html: '<p>\\(p\\)</p>' };
-    mockEntries.a = { content_html: '<p>\\(a\\)</p>' };
-    mockEntries.b = { content_html: '<p>no tex</p>' };
-    mockMathArticles = [
-      { slug: 'a', content_html: '<p>\\(a\\)</p>' },
-      { slug: 'b', content_html: '<p>no tex</p>' },
-    ];
-    await backfillMathInline();
+    await resumePendingMath();
     expect(JSON.parse(mockMeta.math_pending)).toEqual([]);
     expect(mockEntries.p.content_html).toContain('<math-i ');
-    expect(mockEntries.a.content_html).toContain('<math-i ');
-    expect(mockEntries.b.content_html).toBe('<p>no tex</p>'); // untouched
-    expect(mockMeta.math_inline_v2).toBe('1');
   });
 
-  test('is a no-op after the flag is set (but still resumes pending math)', async () => {
-    mockMeta.math_inline_v2 = '1';
-    mockMeta.math_pending = JSON.stringify(['p']);
-    mockEntries.p = { content_html: '<p>\\(p\\)</p>' };
-    await backfillMathInline();
-    expect(db.getMathArticleHtml).not.toHaveBeenCalled();
-    expect(JSON.parse(mockMeta.math_pending)).toEqual([]);
-  });
-
-  test('a failing article does not stop the rest', async () => {
+  test('a failing article does not stop the rest and stays pending', async () => {
+    mockMeta.math_pending = JSON.stringify(['a', 'b']);
     mockEntries.a = { content_html: '<p>\\(a\\)</p>' };
     mockEntries.b = { content_html: '<p>\\(b\\)</p>' };
-    mockMathArticles = [
-      { slug: 'a', content_html: '<p>\\(a\\)</p>' },
-      { slug: 'b', content_html: '<p>\\(b\\)</p>' },
-    ];
-    // 'a' always fails (a single failure is now retried once, see mathCache.ts).
     mockRender.mockImplementation(async (items: Array<{ tex: string; display: boolean }>) => {
       if (items.some(i => i.tex === 'a')) throw new Error('boom');
       return okRender(items);
     });
-    await backfillMathInline();
+    await resumePendingMath();
     expect(mockEntries.a.content_html).toBe('<p>\\(a\\)</p>');
     expect(mockEntries.b.content_html).toContain('<math-i ');
-    expect(mockMeta.math_inline_v2).toBe('1');
+    expect(JSON.parse(mockMeta.math_pending)).toEqual(['a']);
+  });
+
+  test('a killed run resumes with only the missing hashes', async () => {
+    mockMeta.math_pending = JSON.stringify(['a']);
+    mockEntries.a = { content_html: '<p>\\(x\\) and \\(y\\)</p>' };
+    mockRender.mockImplementationOnce(async () => { throw new Error('killed'); });
+    mockRender.mockImplementationOnce(async () => { throw new Error('killed'); });
+    await resumePendingMath(); // run 1 dies; nothing persisted
+    _resetMathCacheState();    // fresh process
+    mockRender.mockClear();
+    mockRender.mockImplementation(okRender);
+    await resumePendingMath();
+    expect(mockEntries.a.content_html).toContain('<math-i ');
+  });
+});
+
+describe('skipMath articles are queued and drained (was: never rendered)', () => {
+  test('an article cached with skipMath gets its equations at the next launch', async () => {
+    await fetchAndCacheArticle('a', { skipMath: true });
+    expect(mockEntries.a.content_html).toContain('\\(x\\)');
+    await resumePendingMath();
+    expect(mockEntries.a.content_html).toContain('<math-i ');
   });
 });
 
 describe('bulk downloads', () => {
-  test('downloadAll skips math and records nothing in math_pending (known gap)', async () => {
+  test('downloadAll renders nothing inline and queues every math article on math_pending', async () => {
+    const hold = jest.spyOn(require('../mathPriority'), 'yieldThenMathMayRun').mockImplementation(() => new Promise<void>(() => {}));
     await downloadAll(() => {});
+    hold.mockRestore();
     expect(mockRender).not.toHaveBeenCalled();
-    expect(mockMeta.math_pending).toBeUndefined();
+    expect(JSON.parse(mockMeta.math_pending).sort()).toEqual(['a', 'b']);
     expect(Object.keys(mockEntries).sort()).toEqual(['a', 'b']);
+  });
+
+  test('after downloadAll the pending list drains', async () => {
+    await downloadAll(() => {});
+    await new Promise<void>(r => setTimeout(() => r(), 1500));
+    for (let i = 0; i < 50 && JSON.parse(mockMeta.math_pending).length; i++) await new Promise<void>(r => setTimeout(() => r(), 200));
+    expect(JSON.parse(mockMeta.math_pending)).toEqual([]);
+    expect(mockEntries.a.content_html).toContain('<math-i ');
   });
 
   test('syncCachedArticles renders math inline (awaitMath) and stamps last_deep_sync', async () => {
