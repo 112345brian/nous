@@ -1,178 +1,64 @@
 import * as SQLite from 'expo-sqlite';
 import type { EntryRow, EntrySummary, ReadRow, ReadNode, Session, Annotation } from '../types';
 import { makeExcerpt } from '../utils/excerpt';
+import { CORE_MIGRATIONS } from './coreMigrations';
+import { runMigrations, userVersionStore } from './migrations';
 
-let _db: SQLite.SQLiteDatabase | null = null;
+// One shared connection. getDb() caches the *promise* of an opened-and-migrated
+// database, so concurrent callers share a single open and none can observe a
+// handle whose schema is still being built. closeDb() waits for any in-flight
+// open, and getDb() waits for any in-flight close before opening again.
+let _open: Promise<SQLite.SQLiteDatabase> | null = null;
+let _closing: Promise<void> | null = null;
+
+async function openAndMigrate(): Promise<SQLite.SQLiteDatabase> {
+  const db = await SQLite.openDatabaseAsync('sep.db');
+  try {
+    // Outside any transaction: SQLite cannot change the journal mode inside one.
+    await db.execAsync('PRAGMA journal_mode = WAL;');
+    await runMigrations(db, CORE_MIGRATIONS, userVersionStore);
+  } catch (e) {
+    await db.closeAsync().catch(() => {});
+    throw e;
+  }
+  return db;
+}
 
 // Exported so feature modules that own their own tables (e.g. services/graphDb.ts)
 // can share the single app DB connection rather than opening their own.
 export async function getDb(): Promise<SQLite.SQLiteDatabase> {
-  if (_db) return _db;
-  _db = await SQLite.openDatabaseAsync('sep.db');
-  await initSchema(_db);
-  return _db;
+  while (_closing) await _closing.catch(() => {});
+  if (!_open) {
+    const opening = openAndMigrate();
+    _open = opening;
+    // A failed open or migration must not be cached: the next caller retries.
+    opening.catch(() => { if (_open === opening) _open = null; });
+  }
+  return _open;
 }
 
 // Used by seedImport — closes the connection so the DB file can be replaced.
+// Resolves once the file is released; a getDb() issued meanwhile waits and then
+// opens the (possibly replaced) file afresh.
 export async function closeDb(): Promise<void> {
-  if (_db) {
-    await _db.closeAsync();
-    _db = null;
-  }
-}
-
-async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
-  await db.execAsync(`
-    PRAGMA journal_mode = WAL;
-
-    CREATE TABLE IF NOT EXISTS entries (
-      slug         TEXT PRIMARY KEY,
-      title        TEXT NOT NULL,
-      parent_label TEXT,
-      source       TEXT NOT NULL DEFAULT 'sep',
-      author       TEXT,
-      pub_date     TEXT,
-      content_hash TEXT,
-      toc_html     TEXT,
-      preamble_html TEXT,
-      content_html TEXT,
-      notes_html   TEXT,
-      word_count   INTEGER DEFAULT 0,
-      read_progress REAL DEFAULT 0,
-      excerpt      TEXT,
-      cached_at    INTEGER
-    );
-
-    CREATE TABLE IF NOT EXISTS reads (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      slug       TEXT NOT NULL,
-      title      TEXT NOT NULL,
-      visited_at INTEGER NOT NULL,
-      from_slug  TEXT,
-      session_id TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS meta (
-      key   TEXT PRIMARY KEY,
-      value TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS bookmarks (
-      slug      TEXT PRIMARY KEY,
-      title     TEXT NOT NULL,
-      saved_at  INTEGER NOT NULL,
-      notes     TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS links (
-      from_slug TEXT NOT NULL,
-      to_slug   TEXT NOT NULL,
-      PRIMARY KEY (from_slug, to_slug)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_links_to_slug ON links(to_slug);
-
-    CREATE TABLE IF NOT EXISTS article_versions (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      slug         TEXT NOT NULL,
-      content_hash TEXT NOT NULL,
-      cached_at    INTEGER NOT NULL,
-      UNIQUE(slug, content_hash)
-    );
-
-    CREATE TABLE IF NOT EXISTS annotations (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      slug          TEXT NOT NULL,
-      selected_text TEXT NOT NULL,
-      context       TEXT,
-      note          TEXT,
-      color         TEXT NOT NULL DEFAULT '#FFE566',
-      content_hash  TEXT,
-      created_at    INTEGER NOT NULL,
-      updated_at    INTEGER NOT NULL
-    );
-
-    -- NOTE: the InPhO semantic-graph tables (inpho_nodes, inpho_relations) are
-    -- owned by services/graphDb.ts, which lazily creates them the first time the
-    -- graph feature is used. Keeping that schema out of the core reader DB keeps
-    -- the graph an optional, self-contained module.
-
-    -- Client-rendered math cache. Each row is a TeX equation rendered to SVG
-    -- ON THIS DEVICE (mathStore.ts / texToSvg.ts) from article TeX the user
-    -- fetched. This is a runtime artifact and is NEVER bundled or shipped — see
-    -- NOTICE.md. hash = mathStore.mathHash(tex, display); d = display flag.
-    CREATE TABLE IF NOT EXISTS math (
-      hash TEXT PRIMARY KEY,
-      svg  TEXT NOT NULL,
-      w    REAL,
-      h    REAL,
-      d    INTEGER NOT NULL DEFAULT 0
-    );
-
-  `);
-
-  // Column migrations — no-op if columns already exist
-  await Promise.all([
-    db.runAsync('ALTER TABLE entries ADD COLUMN pub_date TEXT').catch(() => {}),
-    db.runAsync('ALTER TABLE entries ADD COLUMN content_hash TEXT').catch(() => {}),
-    db.runAsync('ALTER TABLE bookmarks ADD COLUMN notes TEXT').catch(() => {}),
-    db.runAsync('ALTER TABLE annotations ADD COLUMN content_hash TEXT').catch(() => {}),
-    db.runAsync('ALTER TABLE entries ADD COLUMN read_progress REAL DEFAULT 0').catch(() => {}),
-    db.runAsync('ALTER TABLE entries ADD COLUMN excerpt TEXT').catch(() => {}),
-    db.runAsync('ALTER TABLE entries ADD COLUMN parent_label TEXT').catch(() => {}),
-    db.runAsync("ALTER TABLE entries ADD COLUMN source TEXT NOT NULL DEFAULT 'sep'").catch(() => {}),
-    db.runAsync('ALTER TABLE entries ADD COLUMN has_math INTEGER DEFAULT 0').catch(() => {}),
-    db.runAsync('ALTER TABLE entries ADD COLUMN content_ast TEXT').catch(() => {}),
-    db.runAsync('ALTER TABLE entries ADD COLUMN notes_html TEXT').catch(() => {}),
-  ]);
-
-  // One-time migration: clear articles cached before preamble_html column existed
-  // so they re-fetch with the corrected parser (title/preamble no longer embedded in content_html).
-  const didClear = await db.getFirstAsync<{ value: string }>(
-    `SELECT value FROM meta WHERE key = 'migrated_clear_cache_v2'`
-  );
-  if (!didClear) {
-    await db.runAsync(
-      `UPDATE entries SET content_html = NULL, preamble_html = NULL, toc_html = NULL,
-       excerpt = NULL, cached_at = NULL WHERE cached_at IS NOT NULL`
-    );
-    await db.runAsync(
-      `INSERT OR REPLACE INTO meta (key, value) VALUES ('migrated_clear_cache_v2', '1')`
-    );
-  }
-
-  // Parser version: bump when the native HTML parser changes the stored AST in a
-  // user-visible way (e.g. bracket-free footnote refs → fnref). Clearing
-  // content_ast forces cached articles to re-parse with the current parser on
-  // next open, rather than rendering a stale AST frozen at download time.
-  const PARSER_VERSION = '2';
-  const astVer = await db.getFirstAsync<{ value: string }>(
-    `SELECT value FROM meta WHERE key = 'ast_parser_version'`
-  );
-  if (astVer?.value !== PARSER_VERSION) {
-    await db.runAsync('UPDATE entries SET content_ast = NULL');
-    await db.runAsync(
-      `INSERT OR REPLACE INTO meta (key, value) VALUES ('ast_parser_version', ?)`,
-      [PARSER_VERSION]
-    );
-  }
-
-  // Migrate FTS from content-table to standalone if needed, then ensure it exists
-  const ftsInfo = await db.getFirstAsync<{ sql: string }>(
-    `SELECT sql FROM sqlite_master WHERE type='table' AND name='entries_fts'`
-  );
-  const needsCreate = !ftsInfo || ftsInfo.sql?.includes("content='entries'");
-  if (needsCreate) {
-    await db.runAsync('DROP TABLE IF EXISTS entries_fts');
-    await db.runAsync(`
-      CREATE VIRTUAL TABLE entries_fts USING fts5(
-        slug UNINDEXED,
-        title,
-        tokenize='porter ascii'
-      )
-    `);
-    // Populate from existing entries
-    await db.runAsync(`INSERT INTO entries_fts(slug, title) SELECT slug, title FROM entries`);
+  while (_closing) await _closing.catch(() => {});
+  const opening = _open;
+  if (!opening) return;
+  _open = null;
+  const closing = (async () => {
+    let db: SQLite.SQLiteDatabase;
+    try {
+      db = await opening;
+    } catch {
+      return; // the open failed; there is no handle to close
+    }
+    await db.closeAsync();
+  })();
+  _closing = closing;
+  try {
+    await closing;
+  } finally {
+    if (_closing === closing) _closing = null;
   }
 }
 
