@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, ActivityIndicator, InteractionManager,
+  View, Text, StyleSheet, ActivityIndicator,
   TouchableOpacity, Share, Linking, Pressable, Animated, ScrollView,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
@@ -12,13 +12,16 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import {
-  getEntry, getEntryPreview, recordRead, toggleBookmark, isBookmarked,
+  getEntry, getEntryHtml, getEntryPreview, recordRead, toggleBookmark, isBookmarked,
   saveAnnotation, updateAnnotation, deleteAnnotation, getAnnotationsForSlug,
   getMeta, setReadProgress, getLinksTo, indexLinks, getRecentSlugs, getMathSvgMap,
 } from '../services/db';
 import { makeExcerpt } from '../utils/excerpt';
-import { fetchAndCacheArticle, ensureNotesCached } from '../services/catalog';
+import { fetchAndCacheArticle, ensureNotesCached, onMathReady } from '../services/catalog';
+import { perf } from '../utils/perf';
+import { startPrefetch } from '../services/prefetch';
 import { primeBackfillForSlugs, primeGraphLayouts } from '../services/inpho';
+import { idleScheduler } from '../services/idleScheduler';
 import { buildArticleHtml } from '../utils/articleTemplate';
 import { parseSepHtml } from '../utils/sepHtml/parse';
 import { collectMathHashes } from '../utils/sepHtml/collectMathHashes';
@@ -31,7 +34,8 @@ import FootnoteSheet from '../components/FootnoteSheet';
 import { parseToc } from '../utils/parseToc';
 import OrphanedAnnotationsBanner from '../components/OrphanedAnnotationsBanner';
 import type { EntryRow, Annotation } from '../types';
-import { contentHash } from '../services/db';
+import { resolveEntryHash } from '../services/db';
+import { partitionAnnotations } from '../utils/annotationValidity';
 import type { RootStackParamList } from '../../App';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'Article'>;
@@ -226,8 +230,10 @@ export default function ArticleScreen() {
   useEffect(() => {
     if (!nativeArticle) { setMathSvgs({}); return; }
     const hashes = collectMathHashes(nativeArticle.blocks);
-    if (!hashes.length) return;
-    getMathSvgMap(hashes).then(setMathSvgs).catch(() => {});
+    // Effects run after commit, so this is when SepArticle's first frame was handed to the renderer.
+    perf.mark(slug, 'first-render');
+    if (!hashes.length) { perf.end(slug); return; }
+    perf.time(slug, 'math-svg-map', () => getMathSvgMap(hashes)).then(setMathSvgs).catch(() => {}).finally(() => perf.end(slug));
   }, [nativeArticle]);
 
   // Key on content strings (primitives) rather than the entry object so the
@@ -237,9 +243,9 @@ export default function ArticleScreen() {
     ? `${state.entry.slug}:${state.entry.content_hash ?? 'v0'}`
     : null;
   const readyEntry = state.phase === 'ready' ? state.entry : null;
-  // Memoize so contentHash (50k-char djb2) only runs when the article changes.
-  const contentHtmlForHash = state.phase === 'ready' ? (state.entry.content_html ?? '') : '';
-  const entryContentHash = useMemo(() => contentHtmlForHash ? contentHash(contentHtmlForHash) : '', [contentHtmlForHash]);
+  // Read from the row (stored at cache time); only legacy rows without a stored
+  // hash fall back to rehashing, and useMemo keeps that to once per entry.
+  const entryContentHash = useMemo(() => readyEntry ? resolveEntryHash(readyEntry) : '', [readyEntry]);
   useEffect(() => {
     if (!USE_NATIVE_RENDERER || !readyEntry) {
       setNativeArticle(null);
@@ -248,7 +254,8 @@ export default function ArticleScreen() {
     // Fast path: AST was pre-parsed at fetch time — just deserialize.
     if (readyEntry.content_ast) {
       try {
-        setNativeArticle(JSON.parse(readyEntry.content_ast));
+        const ast = readyEntry.content_ast;
+        setNativeArticle(perf.timeSync(slug, 'ast-parse', () => JSON.parse(ast)));
         return;
       } catch { }
     }
@@ -257,11 +264,26 @@ export default function ArticleScreen() {
     let cancelled = false;
     const html = readyEntry.content_html ?? '';
     setTimeout(() => {
-      if (!cancelled) setNativeArticle(parseSepHtml(html));
+      if (!cancelled) setNativeArticle(perf.timeSync(slug, 'ast-parse-slow', () => parseSepHtml(html)));
     }, 0);
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [astKey]);
+
+  // Equations are rendered after the text is shown (see fetchAndCacheArticle).
+  // When this article's math lands, swap in the rewritten AST; the mathSvgs
+  // effect above then loads the SVGs. Only the native AST is replaced, so the
+  // reader keeps their place and state.entry (and its content hash) is untouched.
+  useEffect(() => {
+    if (!USE_NATIVE_RENDERER) return;
+    return onMathReady(async (readySlug) => {
+      if (readySlug !== slug) return;
+      try {
+        const e = await getEntry(slug);
+        if (e?.content_ast) setNativeArticle(JSON.parse(e.content_ast));
+      } catch { /* keep showing the text-only version */ }
+    });
+  }, [slug]);
 
   // Resolve footnote text from notes.html. Uses the stored notes_html when
   // present; otherwise lazily fetches + persists it (for articles cached before
@@ -301,12 +323,41 @@ export default function ArticleScreen() {
     load();
   }, [slug]);
 
+  // Warm a few linked articles once this one is on screen and the reader has
+  // lingered (policy: src/utils/prefetchPolicy.ts). Cancelled on navigation.
+  const isReady = state.phase === 'ready';
+  useEffect(() => {
+    if (!isReady) return;
+    return startPrefetch(slug);
+  }, [slug, isReady]);
+
+  // Background work (link indexing, backfills, graph priming) stays paused while
+  // an article is opening so it can't compete with the load/first render.
   async function load(forceRefetch = false) {
+    const release = idleScheduler.hold();
+    try {
+      await loadArticle(forceRefetch);
+    } finally {
+      release();
+    }
+  }
+
+  async function loadArticle(forceRefetch: boolean) {
+    perf.begin(slug);
     setState({ phase: 'loading' });
     setWebReady(false);
     setBacklinkCount(0);
 
-    let entry = forceRefetch ? null : await getEntry(slug);
+    // These don't depend on the entry, so start them now and let them overlap
+    // with the entry read (and the network fetch on a cold open).
+    const aux = Promise.all([
+      getAnnotationsForSlug(slug),
+      getMeta('custom_css'),
+      getMeta('font_size'),
+    ]);
+    aux.catch(() => {}); // early returns below must not leave an unhandled rejection
+
+    let entry = forceRefetch ? null : await perf.time(slug, 'get-entry', () => getEntry(slug));
 
     if (!entry?.content_html || forceRefetch) {
       setState({ phase: 'fetching' });
@@ -315,7 +366,7 @@ export default function ArticleScreen() {
         setState({ phase: 'error', message: 'Could not load this article. Check your connection.' });
         return;
       }
-      entry = await getEntry(slug);
+      entry = await perf.time(slug, 'get-entry', () => getEntry(slug));
     }
 
     if (!entry?.content_html) {
@@ -323,10 +374,8 @@ export default function ArticleScreen() {
       return;
     }
 
-    const anns = await getAnnotationsForSlug(slug);
-    const currentHash = contentHash(entry.content_html ?? '');
-    const valid = anns.filter(a => !a.content_hash || a.content_hash === currentHash || (entry!.content_html ?? '').includes(a.selected_text));
-    const stale = anns.filter(a => a.content_hash && a.content_hash !== currentHash && !(entry!.content_html ?? '').includes(a.selected_text));
+    const [anns, customCss, fontSizeStr] = await aux;
+    const { valid, stale } = partitionAnnotations(anns, resolveEntryHash(entry), () => entry!.content_html ?? '');
     setAnnotations(valid);
     setOrphaned(stale);
     setOrphanDismissed(false);
@@ -334,18 +383,14 @@ export default function ArticleScreen() {
     recordRead(slug, entry.title, fromSlug).catch(() => {});
     // Defer link indexing and InPhO backfill until after the navigation animation
     // completes so they don't compete with article render on the JS thread.
-    InteractionManager.runAfterInteractions(() => {
-      indexLinks(slug, entry.content_html ?? '').catch(() => {});
-      getRecentSlugs(10).then(recent => {
-        const rest = recent.map(r => r.slug).filter(s => s !== slug);
-        primeBackfillForSlugs([slug, ...rest]);
-        primeGraphLayouts([slug, ...rest]);
-      }).catch(() => {});
+    const contentForIndex = entry.content_html ?? '';
+    idleScheduler.schedule(`index-links:${slug}`, () => indexLinks(slug, contentForIndex));
+    idleScheduler.schedule(`prime-inpho:${slug}`, async () => {
+      const recent = await getRecentSlugs(10);
+      const rest = recent.map(r => r.slug).filter(s => s !== slug);
+      await primeBackfillForSlugs([slug, ...rest]);
+      await primeGraphLayouts([slug, ...rest]);
     });
-    const [customCss, fontSizeStr] = await Promise.all([
-      getMeta('custom_css'),
-      getMeta('font_size'),
-    ]);
     const fontSize = fontSizeStr ? parseInt(fontSizeStr, 10) : undefined;
 
     // Show article immediately — don't wait for backlink count.
@@ -398,6 +443,7 @@ export default function ArticleScreen() {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
       if (msg.type === 'progress') {
+        idleScheduler.noteActivity();
         if (typeof msg.value === 'number') setReadProgress(slug, msg.value).catch(() => {});
       } else if (msg.type === 'backlinks') {
         nav.navigate('Graph', { centerSlug: slug, centerTitle: title });
@@ -417,7 +463,7 @@ export default function ArticleScreen() {
   async function handleSaveAnnotation(
     text: string, context: string | null, color: string, note: string | null
   ) {
-    const currentHash = state.phase === 'ready' ? contentHash(state.entry.content_html ?? '') : null;
+    const currentHash = entryContentHash || null;
     const ann = await saveAnnotation(slug, text, context, color, note, currentHash);
     const updated = [...annotations, ann];
     setAnnotations(updated);
@@ -511,8 +557,7 @@ export default function ArticleScreen() {
   const goToEntry = useCallback(async (target: string) => {
     const enabled = (await getMeta('link_preview')) !== '0'; // default ON
     if (!enabled) { navToEntry(target); return; }
-    const [prev, entry] = await Promise.all([getEntryPreview(target), getEntry(target)]);
-    const html = entry?.content_html ?? null;
+    const [prev, html] = await Promise.all([getEntryPreview(target), getEntryHtml(target)]);
     setLinkPreview({
       slug: target,
       title: prev?.title ?? target,
@@ -721,6 +766,7 @@ export default function ArticleScreen() {
               <SepArticle
                 ref={nativeArticleRef}
                 article={nativeArticle}
+                onScrollActivity={idleScheduler.noteActivity}
                 mathSvgs={mathSvgs}
                 header={
                   <View>

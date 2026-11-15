@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import { getEntryPreview, getEntry, getMeta, setMeta } from '../services/db';
+import { getEntryPreview, getEntryHtml, getMeta, setMeta } from '../services/db';
 import { makeExcerpt } from '../utils/excerpt';
 import { getArticleLinkGraph, getLayoutCache, setLayoutCache } from '../services/graphDb';
 import type { GraphNode, GraphEdge, GraphData, GraphView, CachedPosition } from '../services/graphDb';
@@ -494,14 +494,13 @@ export default function GraphScreen() {
     const wantContext = !!centerSlug && mode === 'links' && slug !== centerSlug;
     Promise.all([
       getEntryPreview(slug),
-      getEntry(slug),
-      wantContext ? getEntry(centerSlug) : Promise.resolve(null),
-    ]).then(([p, target, center]) => {
-      const targetHtml = target?.content_html ?? null;
+      getEntryHtml(slug),
+      wantContext ? getEntryHtml(centerSlug) : Promise.resolve(null),
+    ]).then(([p, targetHtml, centerHtml]) => {
       // Reference sentence: prefer the outgoing link in the center article, then
       // fall back to a backlink to the center inside the target article.
       const context = wantContext
-        ? (center?.content_html ? findLinkSentence(center.content_html, slug) : null)
+        ? (centerHtml ? findLinkSentence(centerHtml, slug) : null)
           ?? (targetHtml ? findLinkSentence(targetHtml, centerSlug) : null)
         : null;
       // Pull a generous, on-the-fly excerpt straight from the cached body so the

@@ -10,6 +10,19 @@ entry title/link index that ships with it. It does **not** and **cannot** grant
 any rights in the Stanford Encyclopedia of Philosophy's article content (see
 below) — those rights are not ours to license.
 
+## Third-party software that ships in the app
+
+- **MathJax** (`mathjax-full`, Apache License 2.0,
+  <https://www.apache.org/licenses/LICENSE-2.0>) is bundled as
+  `src/assets/mathjax-full.b64`, a base64-encoded build of its `tex-svg-full`
+  script. It runs in an off-screen WebView to turn TeX from fetched articles
+  into SVG on the user's device. The build keeps the license headers of the
+  components it contains (for example the mhchem parser, Copyright 2015-2021
+  Martin Hensel, Apache-2.0). This bundle is an engine only; it contains no SEP
+  content, and the SVGs it produces are created at runtime and never shipped.
+
+Other dependencies are listed in `package.json` and keep their own licenses.
+
 ## No affiliation with Stanford
 
 This application is **unofficial**. It is **not affiliated with, endorsed by, or

@@ -14,6 +14,7 @@ import { importSeedFromUrl } from './src/services/seedImport';
 import type { SeedPhase } from './src/services/seedImport';
 import { backfillAst, backfillMathHashFormat, backfillMathInline, downloadAll, refreshIndexIfStale, syncCachedArticles } from './src/services/catalog';
 import { preloadMathJax } from './src/services/mathRender';
+import { idleScheduler } from './src/services/idleScheduler';
 import type { Prefs } from './src/services/db';
 import { IS_TEST_BUILD } from './src/testConfig';
 import MathRenderWebView from './src/components/MathRenderWebView';
@@ -159,19 +160,22 @@ export default function App() {
         finishDownloadNotification(lastTotal).catch(() => {});
       }
 
-      try { await backfillMathInline(); } catch {}
-      try { await backfillMathHashFormat(); } catch {}
-      try { await backfillAst(); } catch {}
-
-      Promise.all([getMeta('auto_sync'), getMeta('last_deep_sync')]).then(([autoSync, lastDeepSync]) => {
+      // Heavy catch-up work runs one task at a time, only while the reader is idle
+      // (and never while an article is opening or scrolling). The scheduler swallows
+      // task errors, so nothing here can reach boot().catch().
+      idleScheduler.schedule('backfill-math-inline', backfillMathInline);
+      idleScheduler.schedule('backfill-math-hash-format', backfillMathHashFormat);
+      idleScheduler.schedule('backfill-ast', backfillAst);
+      idleScheduler.schedule('auto-deep-sync', async () => {
+        const [autoSync, lastDeepSync] = await Promise.all([getMeta('auto_sync'), getMeta('last_deep_sync')]);
         if (autoSync && autoSync !== 'off') {
           const days = autoSync === '2days' ? 2 : 7;
           const elapsed = Date.now() - (lastDeepSync ? Number(lastDeepSync) : 0);
           if (elapsed > days * 24 * 60 * 60 * 1000) {
-            syncCachedArticles(() => {}).catch(() => {});
+            await syncCachedArticles(() => {});
           }
         }
-      }).catch(() => {});
+      });
     })().catch(() => {});
   }
 

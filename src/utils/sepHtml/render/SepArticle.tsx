@@ -14,6 +14,8 @@ export interface SepArticleProps {
   onProgress?: (value: number) => void;
   // Active section id as the user scrolls (scroll-spy for the TOC).
   onActiveSection?: (id: string) => void;
+  // Fires on every scroll event so callers can keep background work paused.
+  onScrollActivity?: () => void;
   renderFallback?: (html: string) => React.ReactNode;
   resolveImageSrc?: (src: string) => string | null;
   annotations?: Annotation[];
@@ -34,7 +36,7 @@ export interface SepArticleHandle {
 }
 
 export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(function SepArticle({
-  article, onLinkPress, onFootnotePress, onProgress, onActiveSection, renderFallback,
+  article, onLinkPress, onFootnotePress, onProgress, onActiveSection, onScrollActivity, renderFallback,
   resolveImageSrc, annotations, onAnnotationPress, onAnnotationCreate, header, footer, mathSvgs,
 }, ref) {
   const { bottom: bottomInset } = useSafeAreaInsets();
@@ -64,6 +66,7 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
   }, []);
 
   const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    onScrollActivity?.();
     const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
     const scrollable = Math.max(1, contentSize.height - layoutMeasurement.height);
     const progress = Math.min(1, Math.max(0, contentOffset.y / scrollable));
@@ -83,7 +86,7 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
         onActiveSection(active);
       }
     }
-  }, [onProgress, onActiveSection]);
+  }, [onProgress, onActiveSection, onScrollActivity]);
 
   useImperativeHandle(ref, () => ({
     scrollToSection(id: string) {

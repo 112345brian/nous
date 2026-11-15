@@ -11,7 +11,7 @@ import { _registerInject, _onMessage, _signalDomReady } from '../services/mathRe
 // <use> refs into a shared cache that won't exist once equations are stored and
 // rendered independently in the native renderer.
 //
-// SOURCE NOTE: this loads the MathJax engine (MIT) from a Metro asset
+// SOURCE NOTE: this loads the MathJax engine (Apache-2.0) from a Metro asset
 // (src/assets/mathjax-full.b64) via mathRender.preloadMathJax(). Keeping it
 // as an asset rather than a JS module avoids the 2.9 MB parse overhead on
 // every cold start. The SVGs it produces are generated on-device at runtime

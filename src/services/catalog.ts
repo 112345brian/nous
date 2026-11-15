@@ -1,4 +1,4 @@
-import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getSlugsByCacheStatus, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, getMathArticleHtml, updateArticleHtml, setArticleAst, getUncachedAstSlugs, getEntry, putMath, getMathSvgMap, setEntryNotes } from './db';
+import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getSlugsByCacheStatus, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, getMathArticleHtml, updateArticleHtml, setArticleAst, getUncachedAstSlugs, getEntryHtml, putMath, putMathBatch, getMathSvgMap, setEntryNotes } from './db';
 import { linkifyHtml } from '../utils/linkifier';
 import seedEntries from '../assets/entry-seed.json';
 import { renderMathBatch } from './mathRender';
@@ -7,6 +7,7 @@ import { mathHash } from '../utils/mathHash';
 import { refreshIndexIfStale as refreshIndexUseCase } from '../core/refreshIndex';
 import type { IndexEntry } from '../types';
 import { extractById, extractMetaContent, extractTitle, extractAuthor, decodeEntities } from '../utils/sepPage';
+import { perf } from '../utils/perf';
 
 // Replace all \(…\) and \[…\] TeX math in the raw HTML with compact <math-i>
 // placeholder elements. SVGs are stored in the `math` DB table by hash so
@@ -31,6 +32,7 @@ async function substitutemath(html: string): Promise<string> {
   const results = await renderMathBatch(spots.map(s => ({ tex: s.tex, display: s.display })));
 
   let out = html;
+  const rows: Array<{ hash: string; svg: string; w: number; h: number; display: boolean }> = [];
   for (let i = spots.length - 1; i >= 0; i--) {
     const r = results[i];
     if (!r || r.error || !r.b64) continue;
@@ -38,13 +40,99 @@ async function substitutemath(html: string): Promise<string> {
     const hash = mathHash(tex, display);
     const w = (r.w ?? 1).toFixed(4);
     const h = (r.h ?? 1).toFixed(4);
-    // Store SVG in the math table (idempotent on hash).
-    await putMath(hash, atob(r.b64), r.w ?? 1, r.h ?? 1, display);
+    rows.push({ hash, svg: atob(r.b64), w: r.w ?? 1, h: r.h ?? 1, display });
     // Tiny placeholder — no base64 in HTML.
     const tag = `<math-i hash="${hash}" d="${display ? '1' : '0'}" w="${w}" h="${h}"></math-i>`;
     out = out.slice(0, index) + tag + out.slice(index + len);
   }
+  // Store SVGs in the math table in one transaction (idempotent on hash). Done
+  // before the caller writes the substituted HTML, so no placeholder can ever
+  // reference a missing row.
+  await putMathBatch(rows);
   return out;
+}
+
+// ── Deferred math ────────────────────────────────────────────────────────────
+// A freshly fetched article is cached and shown with its raw TeX first (the
+// parser renders it as monospace); equations are rendered afterwards and the
+// article is rewritten with <math-i> hash references. Slugs whose math is not
+// done yet are tracked in a meta key so an interrupted run resumes at launch
+// (see resumePendingMath, called from backfillMathInline).
+const MATH_PENDING_KEY = 'math_pending';
+let pendingChain: Promise<void> = Promise.resolve();
+function updatePending(fn: (slugs: Set<string>) => void): Promise<void> {
+  // Serialized: read-modify-write on one meta row must not interleave.
+  pendingChain = pendingChain.then(async () => {
+    try {
+      const raw = await getMeta(MATH_PENDING_KEY);
+      const slugs = new Set<string>(raw ? JSON.parse(raw) : []);
+      fn(slugs);
+      await setMeta(MATH_PENDING_KEY, JSON.stringify([...slugs]));
+    } catch {
+      // non-fatal — worst case the slug is not retried until it is re-fetched
+    }
+  });
+  return pendingChain;
+}
+
+type MathReadyListener = (slug: string) => void;
+const mathReadyListeners = new Set<MathReadyListener>();
+// Subscribe to "this article's equations are now rendered and stored".
+// Returns an unsubscribe function.
+export function onMathReady(cb: MathReadyListener): () => void {
+  mathReadyListeners.add(cb);
+  return () => { mathReadyListeners.delete(cb); };
+}
+
+const mathInFlight = new Map<string, Promise<boolean>>();
+// Render the equations of a cached article and rewrite it with SVG references.
+// `html` may be passed when the caller already holds it (skips a DB read).
+// Resolves true when the article no longer needs math work; false when the
+// renderer made no progress (it stays pending and is retried at next launch).
+export function completeArticleMath(slug: string, html?: string): Promise<boolean> {
+  const existing = mathInFlight.get(slug);
+  if (existing) return existing;
+  const p = (async () => {
+    try {
+      const src = html ?? (await getEntryHtml(slug));
+      if (!src) return false;
+      const updated = await substitutemath(src);
+      if (updated === src) {
+        // Nothing converted. Fine if there was no TeX; otherwise the renderer
+        // timed out — keep it pending.
+        MATH_SUBST_RE.lastIndex = 0;
+        if (MATH_SUBST_RE.test(src)) return false;
+      } else {
+        await updateArticleHtml(slug, updated);
+        await setArticleAst(slug, JSON.stringify(parseSepHtml(updated)));
+      }
+      await updatePending(s => { s.delete(slug); });
+      mathReadyListeners.forEach(cb => { try { cb(slug); } catch { /* listener bug must not break the pipeline */ } });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      mathInFlight.delete(slug);
+    }
+  })();
+  mathInFlight.set(slug, p);
+  return p;
+}
+
+// Finish math for articles whose deferred render never completed (app killed,
+// renderer timed out). Sequential, yielding between articles.
+export async function resumePendingMath(): Promise<void> {
+  let slugs: string[] = [];
+  try {
+    const raw = await getMeta(MATH_PENDING_KEY);
+    slugs = raw ? JSON.parse(raw) : [];
+  } catch {
+    return;
+  }
+  for (const slug of slugs) {
+    await new Promise<void>(r => setTimeout(r, 32));
+    await completeArticleMath(slug);
+  }
 }
 
 // One-time migration: rewrite articles that have the old inline-base64 format
@@ -94,6 +182,8 @@ export async function backfillMathHashFormat(): Promise<void> {
 // articles so their stored content_html has SVGs instead of raw TeX.
 // Runs entirely from the local DB — no network. Guarded by a meta key.
 export async function backfillMathInline(): Promise<void> {
+  // Finish any deferred per-article math from a previous run first.
+  await resumePendingMath().catch(() => {});
   // v2: v1 ran before the WebView renderer existed and converted nothing
   // (MathJax can't run on Hermes), so re-run once against the real renderer.
   const done = await getMeta('math_inline_v2');
@@ -122,9 +212,9 @@ export async function backfillAst(): Promise<void> {
     // doesn't monopolize the JS thread and drop frames while the user is active.
     await new Promise<void>(r => setTimeout(r, 32));
     try {
-      const entry = await getEntry(slug);
-      if (!entry?.content_html) continue;
-      const ast = JSON.stringify(parseSepHtml(entry.content_html));
+      const html = await getEntryHtml(slug);
+      if (!html) continue;
+      const ast = JSON.stringify(parseSepHtml(html));
       await setArticleAst(slug, ast);
     } catch { }
   }
@@ -204,7 +294,7 @@ export async function syncCachedArticles(
     if (signal?.aborted) return;
     const chunk = slugs.slice(i, i + CONCURRENCY);
     await Promise.all(chunk.map(async ({ slug, title }) => {
-      await fetchAndCacheArticle(slug);
+      await fetchAndCacheArticle(slug, { awaitMath: true });
       done++;
       onProgress({ done, total, current: title });
     }));
@@ -213,40 +303,52 @@ export async function syncCachedArticles(
   await setMeta('last_deep_sync', String(Date.now()));
 }
 
-export async function fetchAndCacheArticle(slug: string, opts: { skipMath?: boolean } = {}): Promise<boolean> {
+// Math handling (articles with TeX only):
+//   default        — cache the text now, render equations in the background and
+//                    rewrite the article when done (onMathReady fires). Resolves
+//                    without waiting for MathJax.
+//   awaitMath      — render equations first (old behavior); for bulk sync where
+//                    nobody is waiting on the first paint.
+//   skipMath       — leave raw TeX; bulk download defers to backfillMathInline.
+export async function fetchAndCacheArticle(
+  slug: string,
+  opts: { skipMath?: boolean; awaitMath?: boolean } = {},
+): Promise<boolean> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 30_000);
     let res: Response;
     try {
-      res = await fetch(`${BASE}/entries/${slug}/`, { headers: SEP_HEADERS, signal: controller.signal });
+      res = await perf.time(slug, 'fetch', () => fetch(`${BASE}/entries/${slug}/`, { headers: SEP_HEADERS, signal: controller.signal }));
     } finally {
       clearTimeout(timer);
     }
     if (!res.ok) return false;
-    const html = await res.text();
+    const html = await perf.time(slug, 'fetch-body', () => res.text());
 
-    const title = extractTitle(html) ?? slug;
-    const tocHtml = extractById(html, 'toc');
-    const preambleHtml = extractById(html, 'preamble');
-    const rawContentHtml =
-      extractById(html, 'aueditable') || extractById(html, 'article-content');
+    const { title, tocHtml, preambleHtml, rawContentHtml } = perf.timeSync(slug, 'extract', () => ({
+      title: extractTitle(html) ?? slug,
+      tocHtml: extractById(html, 'toc'),
+      preambleHtml: extractById(html, 'preamble'),
+      rawContentHtml: extractById(html, 'aueditable') || extractById(html, 'article-content'),
+    }));
 
     if (!rawContentHtml) return false;
 
     // aueditable starts with <h1> (title) which the template re-adds itself.
     const contentHtml = rawContentHtml.replace(/^\s*<!--[^>]*-->\s*/, '').replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/i, '');
 
-    const linkedHtml = linkifyHtml(contentHtml);
+    const linkedHtml = perf.timeSync(slug, 'linkify', () => linkifyHtml(contentHtml));
     const hasMath = linkedHtml.includes('\\(') || linkedHtml.includes('\\[');
     // Substitute math unless caller opted out (bulk download defers to backfillMathInline).
-    const finalHtml = hasMath && !opts.skipMath ? await substitutemath(linkedHtml) : linkedHtml;
+    const deferMath = hasMath && !opts.skipMath && !opts.awaitMath;
+    const finalHtml = hasMath && !opts.skipMath && opts.awaitMath ? await perf.time(slug, 'math', () => substitutemath(linkedHtml)) : linkedHtml;
     // Footnote text lives on a sibling notes.html page; fetch it so footnotes
     // resolve offline. Only when the body actually references it.
-    const notesHtml = /notes\.html#note/i.test(finalHtml) ? await fetchNotesHtml(slug) : null;
+    const notesHtml = /notes\.html#note/i.test(finalHtml) ? await perf.time(slug, 'notes', () => fetchNotesHtml(slug)) : null;
     // Pre-parse the AST so ArticleScreen can JSON.parse instead of re-parsing HTML.
-    const content_ast = JSON.stringify(parseSepHtml(finalHtml));
-    await cacheArticle(slug, {
+    const content_ast = perf.timeSync(slug, 'parse+stringify', () => JSON.stringify(parseSepHtml(finalHtml)));
+    await perf.time(slug, 'cache-write', () => cacheArticle(slug, {
       author: extractMetaContent(html, 'citation_author') ?? extractAuthor(html),
       pub_date: extractMetaContent(html, 'citation_publication_date'),
       toc_html: tocHtml,
@@ -255,9 +357,14 @@ export async function fetchAndCacheArticle(slug: string, opts: { skipMath?: bool
       notes_html: notesHtml,
       content_ast,
       has_math: hasMath ? 1 : 0,
-    });
+    }));
     // Index outgoing links for graph view
     indexLinks(slug, contentHtml).catch(() => {});
+    if (deferMath) {
+      // Fire-and-forget: record the debt first so a kill mid-render resumes at
+      // next launch, then render. Errors stay inside completeArticleMath.
+      updatePending(s => { s.add(slug); }).then(() => completeArticleMath(slug, finalHtml));
+    }
     return true;
   } catch {
     return false;
