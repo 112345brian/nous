@@ -1,6 +1,7 @@
 import * as SQLite from 'expo-sqlite';
 import type { EntryRow, EntrySummary, ReadRow, ReadNode, Session, Annotation } from '../types';
 import { makeExcerpt } from '../utils/excerpt';
+import { mergeAnnotation, newUid } from './annotationMerge';
 
 let _db: SQLite.SQLiteDatabase | null = null;
 
@@ -82,6 +83,7 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
 
     CREATE TABLE IF NOT EXISTS annotations (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      uid           TEXT,
       slug          TEXT NOT NULL,
       selected_text TEXT NOT NULL,
       context       TEXT,
@@ -117,6 +119,7 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     db.runAsync('ALTER TABLE entries ADD COLUMN content_hash TEXT').catch(() => {}),
     db.runAsync('ALTER TABLE bookmarks ADD COLUMN notes TEXT').catch(() => {}),
     db.runAsync('ALTER TABLE annotations ADD COLUMN content_hash TEXT').catch(() => {}),
+    db.runAsync('ALTER TABLE annotations ADD COLUMN uid TEXT').catch(() => {}),
     db.runAsync('ALTER TABLE entries ADD COLUMN read_progress REAL DEFAULT 0').catch(() => {}),
     db.runAsync('ALTER TABLE entries ADD COLUMN excerpt TEXT').catch(() => {}),
     db.runAsync('ALTER TABLE entries ADD COLUMN parent_label TEXT').catch(() => {}),
@@ -125,6 +128,14 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     db.runAsync('ALTER TABLE entries ADD COLUMN content_ast TEXT').catch(() => {}),
     db.runAsync('ALTER TABLE entries ADD COLUMN notes_html TEXT').catch(() => {}),
   ]);
+
+  // Cross-device identity for sync: integer ids are device-local, so give every
+  // pre-existing annotation a uid, then enforce uniqueness.
+  const noUid = await db.getAllAsync<{ id: number }>('SELECT id FROM annotations WHERE uid IS NULL');
+  for (const r of noUid) {
+    await db.runAsync('UPDATE annotations SET uid = ? WHERE id = ?', [newUid(), r.id]);
+  }
+  await db.runAsync('CREATE UNIQUE INDEX IF NOT EXISTS idx_annotations_uid ON annotations(uid)');
 
   // One-time migration: clear articles cached before preamble_html column existed
   // so they re-fetch with the corrected parser (title/preamble no longer embedded in content_html).
@@ -833,13 +844,15 @@ export async function saveAnnotation(
 ): Promise<Annotation> {
   const db = await getDb();
   const now = Date.now();
+  const uid = newUid();
   const result = await db.runAsync(
-    `INSERT INTO annotations (slug, selected_text, context, note, color, content_hash, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [slug, selectedText, context ?? null, note ?? null, color, currentHash ?? null, now, now]
+    `INSERT INTO annotations (uid, slug, selected_text, context, note, color, content_hash, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [uid, slug, selectedText, context ?? null, note ?? null, color, currentHash ?? null, now, now]
   );
   return {
     id: result.lastInsertRowId,
+    uid,
     slug, selected_text: selectedText, context: context ?? null,
     note: note ?? null, color, content_hash: currentHash ?? null,
     created_at: now, updated_at: now,
@@ -936,18 +949,10 @@ export async function importUserData(data: UserDataExport): Promise<void> {
         [b.slug, b.title, b.saved_at, b.notes ?? null]
       );
     }
-    // Annotations: upsert by id — incoming id wins on conflict
-    for (const a of data.annotations) {
-      await db.runAsync(
-        `INSERT INTO annotations (id, slug, selected_text, context, note, color, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           note = COALESCE(excluded.note, note),
-           color = excluded.color,
-           updated_at = MAX(updated_at, excluded.updated_at)`,
-        [a.id, a.slug, a.selected_text, a.context ?? null,
-         a.note ?? null, a.color, a.created_at, a.updated_at]
-      );
+    // Annotations: matched across devices by uid (never by the local integer id),
+    // last writer wins per record — see annotationMerge.ts.
+    for (const a of data.annotations ?? []) {
+      await mergeAnnotation(db, a);
     }
     // Prefs: merge, remote wins
     for (const [key, value] of Object.entries(data.prefs ?? {})) {
