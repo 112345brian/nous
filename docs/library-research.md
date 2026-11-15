@@ -167,11 +167,25 @@ math, this will not fix it, though it may still fix scroll feel and anchor jumps
   aspect in `Blocks.tsx`, measured WebView height in `FallbackBlock`) so they are
   never recycled; TOC jumps use `scrollToIndex` only (no `onScrollToIndexFailed`
   retry hack); scroll-spy uses `getFirstVisibleIndex()` plus `activeHeadingId()`.
-- **Why the spy changed:** `onHeadingLayout` stores `layout.y`, which is relative to
-  the heading's parent cell, not the list content, so the existing offset-based spy
-  (and the `scrollToOffset(y)` branch of `scrollToSection`) compares apples to
-  oranges. Not fixed on the FlatList path (out of scope), but worth a device check:
-  it may explain odd TOC-highlight or jump behavior today.
+- **Why the spy changed, and a bug on the shipping FlatList path (confirmed by
+  reading source, not yet observed on a device):** `onHeadingLayout` stores
+  `onLayout`'s `layout.y`, which is the heading's position inside its parent *cell*,
+  not in the list. RN 0.81's `VirtualizedListCellRenderer` wraps each item in a plain
+  `View`, and `BlockView`'s heading `View` is that wrapper's direct child, so the
+  recorded `y` is just its top margin: **40** for h2, **26** for h3, **17** for h4
+  (16 for the first block; `theme.ts` `sepBlock`). Consequences today:
+  - `scrollToSection(id)` takes the offset branch whenever that heading has been
+    rendered once (the map is never cleared; the first 12 blocks render up front), so
+    tapping such a TOC entry calls `scrollToOffset({ offset: 17..40 })`, i.e. scrolls
+    to the **top of the article**, not the section. It only lands correctly for
+    headings that have *not* yet rendered (index branch). Even a correct cell-relative
+    value would also need the cell's own offset and the header height.
+  - The offset-based scroll-spy has the same flaw, but it is currently **dead code**:
+    no caller passes `onActiveSection` (only `SepArticle.tsx` mentions it).
+  - The FlashList path avoids both by jumping and spying by block index.
+  - **Likely fix for the FlatList path:** drop `headingOffsets`/`onHeadingLayout` and
+    always use `scrollToIndex` (the existing `onScrollToIndexFailed` handles
+    unmeasured items), with `viewOffset` if a gap above the heading is wanted.
 - **Verified (jest, mocked measurement):** both engines mount and render blocks,
   header and footer; a math SVG arriving after first paint appears in an
   already-visible cell; 13 new tests (helpers + smoke); `tsc` and `eslint` clean on
