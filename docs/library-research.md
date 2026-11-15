@@ -253,14 +253,12 @@ math must be generated on-device from fetched TeX, never as a bundled or CI-buil
    `mathjax-full.b64` asset we redistribute.
 3. `@react-native/new-app-screen` is listed in `package.json` but is not imported
    anywhere in `src/` or `App.tsx` (template leftover); safe to remove after a build check.
-4. **`react-native-worklets` is not declared in `package.json`.** `babel.config.js` uses
-   `react-native-reanimated/plugin`, which requires `react-native-worklets/plugin`.
-   `package-lock.json` has it only as an optional peer (resolved to 0.8.3), so
-   `npm ci --legacy-peer-deps` (what CI runs) does not install it and **every jest
-   suite fails at Babel** (`Cannot find module 'react-native-worklets/plugin'`) on a
-   clean checkout. Expo SDK 54 pins `react-native-worklets` at `0.5.1`; fix with
-   `npx expo install react-native-worklets`. (Found while setting up the spike; it
-   is not part of the FlashList change.)
+4. **`react-native-worklets` was not declared in `package.json`** (fixed in the commit
+   after the spike). `babel.config.js` uses `react-native-reanimated/plugin`, which
+   requires `react-native-worklets/plugin`. The lockfile had it only as an optional peer
+   (resolved to 0.8.3, outside Expo's pin), so `npm ci --legacy-peer-deps` (what CI runs)
+   did not install it and every jest suite failed at Babel on a clean checkout. It is
+   now declared at Expo SDK 54's pin, `0.5.1`.
 
 ## Sources
 
