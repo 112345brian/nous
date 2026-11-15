@@ -116,6 +116,24 @@ Reading these:
   the WebView path slow to start (WKWebView process, file read + `atob`, inject,
   bridge). Those are the thing the `perf` stage timings should be used to measure.
 
+### If tiered math is on (complex-only subset)
+
+A separate branch adds a classifier that renders trivially simple TeX as styled text and
+sends only the rest to MathJax. Its `mathTier.ts` is not on this branch, so I used a
+**stand-in** (`scripts/hermes-spike/tier-proxy.js`: one token, single-token scripts, one simple
+binary operator, no `\frac`/`\text`/environments/etc.). It will not match the real classifier.
+
+| Corpus subset (Hermes CLI, bytecode, 5 passes, `Date.now()`) | Equations | Mean per equation |
+|---|---|---|
+| All | 352 | 1.07 ms |
+| Complex only (what MathJax would still see) | 259 (74%) | 1.23 ms |
+
+So with this proxy, tiering removes 26% of the corpus equations but only about 15% of the
+rendering time, since simple equations are the cheap ones. These corpus snippets are shorter than
+the 500-equation set above (about 1.1 ms vs about 2.9 ms per equation), and my corpus's
+simple/complex mix is not an article mix, so treat the ratio as indicative only. Correctness
+mismatches above are all in the complex subset. Re-run with the real classifier once it lands.
+
 ## What I could not verify
 
 * **On-device (iOS or Android) anything.** `xcrun simctl` isn't available here
