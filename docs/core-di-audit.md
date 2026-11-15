@@ -35,7 +35,7 @@ because they leak state or globals into the logic that calls them.
 | `services/graphDb.ts` | `_schema` (creates its own tables lazily) | `getDb()` x4 from `./db` | `Date.now` x4 | `GraphStore` adapter; the graph assembly (nodes/edges from rows) is pure and could move inward | Listed |
 | `services/inpho.ts` | `_primedSlugs` (Set) | `fetch` (`getJson`), `expo-file-system` (dev-seed files, `__DEV__` only), `getMeta/setMeta` from `./db` | `Date.now` x2, `setTimeout` x1 | `GraphSource`, `KeyValueStore`, `Clock`, `Sleep` | Listed |
 | `services/mathRender.ts` | 7 module variables (`injectFn`, `domReady`, `resolveReady`, `readyPromise`, `mathJaxLoading`, `seq`, `pending`) forming a bridge to the WebView component | `expo-asset`, `expo-file-system` | `setTimeout` (timeout race) | `MathRenderer` (batch **and** readiness lifecycle) | Listed |
-| `services/downloadNotification.ts` | `state` (throttle bookkeeping) | `react-native` `NativeModules`/`Platform`, `expo-notifications` | `Date.now` x1, `setTimeout` x2 | `ProgressNotifier` adapter | Already injected into the core (see section 3) |
+| `services/downloadNotification.ts` | none now (the iOS permission flag is per sink instance) | `react-native` `NativeModules`/`Platform`, `expo-notifications` | `setTimeout` x2 (the 8 s dismiss, a platform call) | `ProgressNotifier` (core, throttle) over a `ProgressSink` (adapter) | **Converted**: `core/downloadNotifier.ts` holds the 3 s / 30 article throttle with the clock injected; the adapter keeps only the native and expo calls |
 | `services/seedImport.ts` | none | `expo-file-system` (+ `/legacy`), dynamic `import('./db')` to call `closeDb` | none | `SeedFiles`, `SeedDatabase`, `UserDataStore` (export/import), `KeyValueStore`, `Clock` | **Converted**: `core/seedImport.ts` holds download/validate/snapshot/swap/restore/rollback; the adapter is the file and connection calls only; wired in `composition.ts` as `importSeedFromUrl` |
 | `screens/*`, `App.tsx` | n/a (UI) | 10 files import `services/db` as a value (tracked by a shrink-only test) | `InteractionManager` (ArticleScreen only), `Date.now` (HistoryScreen, ArticleScreen `updated_at`, App auto-sync interval), `setTimeout` (UI debounces) | wired use cases | Listed |
 
@@ -67,8 +67,13 @@ use case is wired there and nowhere else:
   `services/commonMathWiring.ts` (the `meta` stamp, `ensureMath` at background priority,
   the idle scheduler) is in the root, because connecting concrete adapters to a use case is what
   the root is for;
-- link prefetch: `services/prefetch.ts` keeps the NetInfo/InteractionManager edge and receives
-  the "cache one article" function from the root as a parameter.
+- link prefetch: `core/prefetch.ts` (`createPrefetcher`) takes `Connectivity`, `Interactions`, `Delay`,
+  `LinkLookup` and the "cache one article" function; the root builds the one instance and exports
+  `startPrefetch`. `services/prefetch.ts` is only the NetInfo and InteractionManager adapters.
+- download notification: `core/downloadNotifier.ts` (`createProgressNotifier`) over the platform
+  sink; the root exports `start/update/finishDownloadNotification` for `useBoot`.
+- secrets: the `SecretStore` port is in `core/ports.ts`; `services/secureSecrets.ts` implements it
+  (`secureSecretStore`) and keeps its named functions, which `db.ts` still imports.
 
 What still wires itself outside the root:
 
@@ -297,7 +302,7 @@ branch, and converting everything this audit listed, these remain outside `src/c
 | `utils/motion.ts`, `utils/useBackDismiss.ts`, `utils/sepHtml/render/**` | `utils/` | React Native UI code that sits under `utils/`. Recorded as outer-ring exceptions in `innerRing.test.ts` (each is checked to still import react or react-native). They belong in a `ui/` folder; moving them touches imports in files other sessions edit. |
 | `theme/` | UI | Outer ring by definition (the enforcement test lists it). |
 | `useBoot` notifier wiring, `MathRenderWebView` bridge | UI | See section 3. |
-| Module state in adapters: `attempted` in `services/prefetch.ts` and the bridge variables in `mathRender.ts` | `services/` | Allowed at the edge. (The cache, the scheduler and the pacing are now instances built in the root; `_resetMathCacheState` is just that instance's `reset`.) |
+| Module state in adapters: the bridge variables in `mathRender.ts` (`attempted` in prefetch is now instance state in `core/prefetch.ts`) | `services/` | Allowed at the edge. (The cache, the scheduler and the pacing are now instances built in the root; `_resetMathCacheState` is just that instance's `reset`.) |
 
 ### What the parent's new code added to the picture
 
@@ -310,3 +315,11 @@ branch, and converting everything this audit listed, these remain outside `src/c
   port) and `seedImport`.
 - The parent tests that imported `downloadAll`, `syncCachedArticles`, `completeArticleMath` and
   friends from `services/catalog` now import them from `composition`. Only import lines changed.
+
+### Notification / prefetch / secrets slice
+
+| Was | Now | Left outside the core, and why |
+|---|---|---|
+| `downloadNotification.ts`: module `state`, `Date.now`, throttle | `core/downloadNotifier.ts` + `ProgressNotifier`/`ProgressSink` ports; clock injected | Android/iOS calls and the 8 s `setTimeout` dismiss, in `createPlatformProgressSink()` (platform calls) |
+| `prefetch.ts`: module `attempted`, NetInfo, InteractionManager, `./db` | `core/prefetch.ts` + `Connectivity`, `Interactions`, `Delay`, `LinkLookup`; `attempted` is instance state | `netInfoConnectivity`, `rnInteractions`; the `setTimeout` delay is built in the root |
+| `secureSecrets.ts`: lazy module `mod` | `SecretStore` port in `core/ports.ts`; `secureSecretStore` adapter | The lazy `require` of `expo-secure-store` (it throws at import when unlinked). `db.ts` (not this slice) still imports the named functions; routing it through a `SecretStore` passed in from the root is for whoever owns `db.ts`. There is no logic worth a core module: every function is "call the platform, turn a failure into a return value". |

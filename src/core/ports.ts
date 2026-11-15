@@ -221,3 +221,57 @@ export interface SeedDatabase {
     readProgress: Array<{ slug: string; read_progress: number }>;
   }): Promise<void>;
 }
+
+// ── Notification, prefetch and secrets ports ─────────────────────────────────
+
+/** Shows download progress to the reader (Android progress bar, iOS text notification). */
+export interface ProgressNotifier {
+  start(): Promise<void>;
+  /** `done` of `total` articles so far; the implementation decides how often this is shown. */
+  update(done: number, total: number): Promise<void>;
+  finish(total: number): Promise<void>;
+}
+
+/** What the notification platform can show. Unthrottled: the core decides when `update` is called. */
+export interface ProgressSink {
+  start(): Promise<void>;
+  update(done: number, total: number): void;
+  finish(total: number): Promise<void>;
+}
+
+/** The connection as the prefetch policy sees it (null = unknown). */
+export interface ConnectionInfo {
+  isConnected: boolean | null;
+  isInternetReachable: boolean | null;
+  /** Cellular or metered. */
+  isExpensive: boolean | null;
+}
+export interface Connectivity {
+  current(): Promise<ConnectionInfo>;
+}
+
+/** Runs a callback once animations and gestures have settled. */
+export interface Interactions {
+  afterInteractions(cb: () => void): { cancel(): void };
+}
+
+/** A cancellable pause. */
+export interface Delay {
+  start(ms: number): { done: Promise<void>; cancel(): void };
+}
+
+/** Outgoing links of an entry, with whether each target is cached (`cached_at` null = not). */
+export interface LinkLookup {
+  getLinksFrom(slug: string): Promise<Array<{ slug: string; cached_at: number | null }>>;
+}
+
+/** Secrets such as the Zotero API key (Keychain / Keystore). Failures come back as values, never throws. */
+export interface SecretStore {
+  available(): Promise<boolean>;
+  /** The stored secret, or null if absent or unreadable. */
+  get(key: string): Promise<string | null>;
+  /** True only if the value was stored. */
+  set(key: string, value: string): Promise<boolean>;
+  /** True if the secret is gone (or never existed). */
+  delete(key: string): Promise<boolean>;
+}

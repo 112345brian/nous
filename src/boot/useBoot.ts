@@ -3,9 +3,8 @@ import { getEntryCount, getMeta, getPrefs, getRecentSlugs, savePrefs } from '../
 import type { Prefs } from '../services/db';
 import { importSeedFromUrl } from '../composition';
 import type { SeedPhase } from '../composition';
-import { backfillAst, resumePendingMath, downloadAll, refreshIndexIfStale, syncCachedArticles, scheduleCommonMathPrewarm, idleScheduler, withDownloadHold } from '../composition';
+import { backfillAst, resumePendingMath, downloadAll, refreshIndexIfStale, syncCachedArticles, scheduleCommonMathPrewarm, idleScheduler, withDownloadHold, startDownloadNotification, updateDownloadNotification, finishDownloadNotification } from '../composition';
 import { preloadMathJax } from '../services/mathRender';
-import { startDownloadNotification, updateDownloadNotification, finishDownloadNotification } from '../services/downloadNotification';
 
 export type AppPhase = 'booting' | 'onboarding' | 'seeding' | 'seed_error' | 'indexing' | 'index_error' | 'ready';
 
