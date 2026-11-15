@@ -11,7 +11,7 @@ export function normalizeTex(tex: string): string {
 
 // 64-bit hash: two independent djb2-xor passes with different seeds (birthday
 // collision at ~2^32 unique inputs, essentially impossible across the SEP corpus).
-// Also used on raw SVG bytes by backfillMathHashFormat, hence exported unnormalized.
+// Takes the string exactly as given; normalization happens in mathHash.
 export function hash64(input: string, display: boolean): string {
   let h1 = 5381, h2 = 52711;
   const s = input + (display ? '\x01' : '\x00');

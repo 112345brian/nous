@@ -262,3 +262,30 @@ describe('hot-query indexes', () => {
     expect((await m2.getSessions(30))).toHaveLength(1);
   });
 });
+
+describe('clearArticleCache', () => {
+  it('drops cached content and the list of articles waiting for math', async () => {
+    await seedEntries([{ slug: 'a', title: 'A', cached: true }]);
+    const db = await m.getDb();
+    await db.runAsync("UPDATE entries SET content_html = '<p>x</p>' WHERE slug = 'a'");
+    await m.setMeta('math_pending', JSON.stringify(['a']));
+    expect(await m.getMeta('math_pending')).toBe('["a"]');
+
+    await m.clearArticleCache();
+
+    const row = await db.getFirstAsync('SELECT content_html, cached_at FROM entries WHERE slug = ?', ['a']);
+    expect(row).toEqual({ content_html: null, cached_at: null });
+    // both the stored row and the in-memory meta cache are cleared
+    expect(await m.getMeta('math_pending')).toBeNull();
+    expect(await db.getFirstAsync("SELECT value FROM meta WHERE key = 'math_pending'")).toBeNull();
+  });
+
+  it('keeps user data and settings', async () => {
+    await seedEntries([{ slug: 'a', title: 'A', cached: true }]);
+    await m.setMeta('font_size', '19');
+    await addRead('s1', 'a', 1000);
+    await m.clearArticleCache();
+    expect(await m.getMeta('font_size')).toBe('19');
+    expect(await m.getSessions(30)).toHaveLength(1);
+  });
+});

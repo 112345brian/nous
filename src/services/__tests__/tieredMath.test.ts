@@ -18,7 +18,6 @@ jest.mock('../db', () => ({
   getAllEntryTitles: jest.fn(async () => []),
   invalidateLinkCache: jest.fn(),
   cleanDenormalizedTitles: jest.fn(),
-  getMathArticleHtml: jest.fn(async () => []),
   updateArticleHtml: jest.fn(async (slug: string, html: string) => {
     mockEntries[slug] = { content_html: html };
   }),

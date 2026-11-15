@@ -53,7 +53,6 @@ export const CACHE_META_KEYS: ReadonlySet<string> = new Set([
   'link_index_json',
   'last_deep_sync',
   'math_pending', // slugs whose equations are not rendered yet
-  'math_hash_format_v1',
   'ast_parser_version',
   'math_tier_stamp', // which math pipeline produced the cached articles
 ]);

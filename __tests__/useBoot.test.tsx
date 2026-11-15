@@ -11,7 +11,6 @@ jest.mock('../src/services/db', () => ({
   savePrefs: jest.fn(),
 }));
 jest.mock('../src/services/seedImport', () => ({ importSeedFromUrl: jest.fn() }));
-jest.mock('../src/services/catalog', () => ({ backfillMathHashFormat: jest.fn() }));
 // The use cases come from the composition root. The common-math pre-warm is wired there too; its
 // stand-in schedules the same task name through the (mocked) idle scheduler, as the real one does.
 jest.mock('../src/composition', () => {
@@ -87,7 +86,7 @@ test('populated index goes straight to ready and schedules backfills', async () 
   expect(result.phase).toBe('ready');
   expect(root.refreshIndexIfStale).toHaveBeenCalledTimes(1);
   const names = idleScheduler.schedule.mock.calls.map((c: unknown[]) => c[0]);
-  expect(names).toEqual(['resume-pending-math', 'backfill-math-hash-format', 'backfill-ast', 'auto-deep-sync', 'prewarm-common-math']);
+  expect(names).toEqual(['resume-pending-math', 'backfill-ast', 'auto-deep-sync', 'prewarm-common-math']);
 });
 
 test('empty index goes through indexing to ready', async () => {

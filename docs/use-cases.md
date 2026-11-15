@@ -63,7 +63,7 @@ missing behavior, see section 4.
 |---|---|---|---|---|
 | UC-C1 | Open an article | Show the cached copy; if absent, fetch, process and cache it, then show it. Record the read. | `ArticleScreen.load`, `fetchAndCacheArticle`, `getEntry`, `recordRead` | ok (slow first open) |
 | UC-C2 | Read with remembered position | Save scroll progress; restore it on reopen. | `setReadProgress`, `forceSetReadProgress` | ok |
-| UC-C3 | Jump within an article | Use the table of contents or an anchor link. | `TocSheet`, `parseToc`, `handleTocJump` | **gap** (TOC taps may land at the top, see section 4) |
+| UC-C3 | Jump within an article | Use the table of contents or an anchor link. | `TocSheet`, `parseToc`, `handleTocJump` | ok (TOC jumps and the scroll-spy go by block index; unverified on a device) |
 | UC-C4 | Read a footnote | Tap a note marker to see its text in a sheet. | `FootnoteSheet`, `ensureNotesCached`, `fetchNotesHtml` | ok |
 | UC-C5 | Follow a link to another entry | Tapping an SEP link opens that entry; external links open the browser. | `handleNativeLink`, `linkifier` | ok |
 | UC-C6 | Read equations | TeX is rendered to SVG on the device, cached by hash, shown inline. | `mathRender`, `substitutemath`, `putMath`, `getMathSvgMap` | ok |
@@ -99,7 +99,7 @@ missing behavior, see section 4.
 
 | ID | Use case | Summary | Code today | Status |
 |---|---|---|---|---|
-| UC-G1 | Download the library | Download all uncached articles for the chosen scope, with progress, notification and cancel. | `catalog.downloadAll`, `downloadNotification` | **gap** (downloaded math articles may keep raw TeX, see section 4) |
+| UC-G1 | Download the library | Download all uncached articles for the chosen scope, with progress, notification and cancel. | `catalog.downloadAll`, `downloadNotification` | ok (downloaded math articles are queued on `math_pending` and rendered at low priority; unverified on a device) |
 | UC-G2 | Keep cached articles current | Periodic or manual deep sync of cached articles. | `syncCachedArticles` | ok |
 | UC-G3 | Free storage | Clear the article cache. | `clearArticleCache` | ok |
 | UC-G4 | Choose library scope | SEP only, OWL only or both. | `getPrefs`/`savePrefs`, `getSlugsByCacheStatus` | ok |
@@ -169,15 +169,24 @@ Fixed since the first draft of this file (see git history for the commits):
 - **Search crashed on a double quote** (UC-B2). Words are now quoted and embedded
   quotes escaped (`src/utils/ftsQuery.ts`, tested against the real FTS5 engine).
 
+Also fixed (merged the same day, **not yet checked on a device**):
+
+- **Math after a bulk download or prefetch** (UC-G1, UC-C1). Articles cached without
+  rendering math are queued on the `math_pending` list and rendered by the idle
+  scheduler at low priority; the one-shot backfill flag is gone.
+- **TOC taps** (UC-C3). Jumps and the active-section tracking use the block index
+  instead of cell-relative offsets.
+
 Still open:
 
 1. **UC-B2:** search covers entry titles only. That is a product limit, not a bug,
    and the README now says so.
-2. **Math after a bulk download or prefetch** (UC-G1, UC-C1): articles cached
-   without rendering math may keep raw TeX until the pending list drains. A fix is
-   in progress.
-3. **TOC taps** (UC-C3): jumping to a heading on the shipping list path can land at
-   the top of the article. A fix is in progress.
+2. **Not behind use cases yet:** nine screens and components still read and write
+   through `services/db.ts` directly (the list is in `docs/core-di-audit.md`), and
+   the graph (F) is called directly. The core covers fetching, caching, sync,
+   downloads, math and the backfills.
+3. **Home screen:** the old "Continue reading" section no longer exists (the Reading
+   tab shows Bookmarks and Recent). If that was unintended, it is a regression.
 
 ## 5. README versus code
 

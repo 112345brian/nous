@@ -29,6 +29,6 @@ it('does not touch braces or commands: x_1 and x_{1} stay separate', () => {
   expect(normalizeTex('\\frac { a } { b }')).toBe('\\frac { a } { b }');
 });
 
-it('hash64 is unnormalized (SVG hashing in backfillMathHashFormat keeps its keys)', () => {
+it('hash64 hashes the string exactly as given (normalization happens in mathHash)', () => {
   expect(hash64('a  b', false)).not.toBe(hash64('a b', false));
 });
