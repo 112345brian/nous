@@ -1,6 +1,13 @@
-// On-device TeX → SVG renderer (MathJax in the RN JS runtime).
+// On-device TeX → SVG renderer that runs MathJax directly in the JS runtime.
 //
-// LICENSING: we ship the math *engine* (mathjax-full, MIT-licensed) and render
+// STATUS: NOT IN USE. Nothing in the app imports this file; its only consumer is
+// its own test. The live math path is mathRender.ts → the hidden MathJax WebView
+// (components/MathRenderWebView.tsx), because MathJax failed at module init under
+// Hermes (see git history: cf1db37 → 95d69c9 → d63e6c5). The file is kept as the
+// starting point for a possible "MathJax in Hermes" spike (docs/library-research.md,
+// section 2); delete it if that spike is dropped.
+//
+// LICENSING: we ship the math *engine* (mathjax-full, Apache-2.0) and render
 // each equation on the user's device from TeX that arrived inside the
 // already-fetched article HTML. The resulting SVG is a runtime artifact, created
 // and stored on the client — it is never a build-time asset and never ships in

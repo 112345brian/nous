@@ -34,7 +34,7 @@ const MAX_ASSET_BYTES = 1024 * 1024; // 1 MB
 const ALLOWLIST = new Set([
   'src/assets/entry-seed.json',
   'src/assets/linkMapData.ts',
-  'src/assets/mathjax-full.b64', // MathJax engine, MIT-licensed — not SEP content
+  'src/assets/mathjax-full.b64', // MathJax engine, Apache-2.0 (see NOTICE.md) — not SEP content
 ]);
 
 // Database extensions are never allowed in the artifact, regardless of size/path.
