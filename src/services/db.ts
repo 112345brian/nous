@@ -36,7 +36,7 @@ async function applyMathTierStamp(db: SQLite.SQLiteDatabase): Promise<void> {
       `UPDATE entries SET content_html = NULL, preamble_html = NULL, toc_html = NULL, notes_html = NULL,
        content_ast = NULL, excerpt = NULL, cached_at = NULL WHERE cached_at IS NOT NULL`
     );
-    await db.runAsync(`DELETE FROM meta WHERE key IN ('math_pending', 'math_hash_format_v1')`);
+    await db.runAsync(`DELETE FROM meta WHERE key = 'math_pending'`);
   }
   await db.runAsync(`INSERT OR REPLACE INTO meta (key, value) VALUES ('math_tier_stamp', ?)`, [tierStamp]);
 }
@@ -201,16 +201,6 @@ export async function upsertIndexEntries(
       await db.runAsync(`INSERT INTO entries_fts (slug, title) VALUES (?, ?)`, [e.slug, e.title]);
     }
   });
-}
-
-// Return content_html for all cached math articles. Used by the startup
-// backfill in catalog.ts to substitute raw TeX with pre-rendered SVGs.
-export async function getMathArticleHtml(): Promise<Array<{ slug: string; content_html: string }>> {
-  const db = await getDb();
-  const rows = await db.getAllAsync<{ slug: string; content_html: string }>(
-    `SELECT slug, content_html FROM entries WHERE has_math = 1 AND content_html IS NOT NULL`
-  );
-  return rows;
 }
 
 // Overwrite content_html and clear AST for a single entry. Used by the math pipeline.
@@ -613,11 +603,9 @@ export async function clearArticleCache(): Promise<void> {
   await db.runAsync(
     'UPDATE entries SET content_html = NULL, toc_html = NULL, preamble_html = NULL, cached_at = NULL'
   );
-  // Clear the backfill flag so it re-runs against the fresh downloads on next launch.
-  await db.runAsync(
-    "DELETE FROM meta WHERE key IN ('math_hash_format_v1')"
-  );
-  metaCache.delete('math_hash_format_v1');
+  // The articles are gone, so the list of articles waiting for math rendering is moot.
+  await db.runAsync("DELETE FROM meta WHERE key = 'math_pending'");
+  metaCache.delete('math_pending');
 }
 
 export async function getSlugsByCacheStatus(scope: 'all' | 'sep' | 'owl' = 'all'): Promise<{

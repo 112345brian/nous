@@ -27,7 +27,7 @@ jest.mock('../db', () => ({
   // unused by these paths but imported by catalog.ts
   upsertIndexEntries: jest.fn(), cacheArticle: jest.fn(), getEntryCount: jest.fn(), getSlugsByCacheStatus: jest.fn(),
   getCachedSlugs: jest.fn(), indexLinks: jest.fn(), getAllEntryTitles: jest.fn(), invalidateLinkCache: jest.fn(),
-  cleanDenormalizedTitles: jest.fn(), getMathArticleHtml: jest.fn(async () => []), getUncachedAstSlugs: jest.fn(async () => []),
+  cleanDenormalizedTitles: jest.fn(), getUncachedAstSlugs: jest.fn(async () => []),
   putMath: jest.fn(), getMathSvgMap: jest.fn(async () => ({})), setEntryNotes: jest.fn(),
 }));
 

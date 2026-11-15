@@ -4,7 +4,6 @@
 
 const mockMeta: Record<string, string> = {};
 const mockEntries: Record<string, { content_html: string }> = {};
-let mockMathArticles: Array<{ slug: string; content_html: string }> = [];
 
 jest.mock('../db', () => ({
   upsertIndexEntries: jest.fn(),
@@ -18,7 +17,6 @@ jest.mock('../db', () => ({
   getAllEntryTitles: jest.fn(async () => []),
   invalidateLinkCache: jest.fn(),
   cleanDenormalizedTitles: jest.fn(),
-  getMathArticleHtml: jest.fn(async () => mockMathArticles),
   updateArticleHtml: jest.fn(async (slug: string, html: string) => { mockEntries[slug] = { content_html: html }; }),
   setArticleAst: jest.fn(async () => {}),
   getUncachedAstSlugs: jest.fn(async () => []),
@@ -48,8 +46,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   for (const k of Object.keys(mockMeta)) delete mockMeta[k];
   for (const k of Object.keys(mockEntries)) delete mockEntries[k];
-  mockMathArticles = [];
-  mockRender.mockImplementation(okRender);
+    mockRender.mockImplementation(okRender);
   (globalThis as any).fetch = jest.fn(async () => ({ ok: true, text: async () => PAGE }));
 });
 

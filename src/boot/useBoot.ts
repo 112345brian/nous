@@ -3,7 +3,6 @@ import { getEntryCount, getMeta, getPrefs, getRecentSlugs, savePrefs } from '../
 import type { Prefs } from '../services/db';
 import { importSeedFromUrl } from '../services/seedImport';
 import type { SeedPhase } from '../services/seedImport';
-import { backfillMathHashFormat } from '../services/catalog';
 import { backfillAst, resumePendingMath, downloadAll, refreshIndexIfStale, syncCachedArticles, scheduleCommonMathPrewarm } from '../composition';
 import { preloadMathJax } from '../services/mathRender';
 import { idleScheduler } from '../services/idleScheduler';
@@ -84,7 +83,6 @@ export function useBoot(openArticle: (slug: string, title: string) => void): Boo
       // (and never while an article is opening or scrolling). The scheduler swallows
       // task errors, so nothing here can reach boot().catch().
       idleScheduler.schedule('resume-pending-math', resumePendingMath);
-      idleScheduler.schedule('backfill-math-hash-format', backfillMathHashFormat);
       idleScheduler.schedule('backfill-ast', backfillAst);
       idleScheduler.schedule('auto-deep-sync', async () => {
         const [autoSync, lastDeepSync] = await Promise.all([getMeta('auto_sync'), getMeta('last_deep_sync')]);

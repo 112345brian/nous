@@ -61,7 +61,6 @@ the first unfinished article.
 `src/utils/mathKey.ts` (pure) defines the table key: `mathHash(tex, display)` =
 `hash64(normalizeTex(tex), display)`, where normalization only trims and collapses whitespace
 runs (braces and commands are untouched: `x_1` and `x_{1}` stay separate). `catalog.ts`
-imports it; `hash64` is also what `backfillMathHashFormat` uses on raw SVG bytes, unchanged.
 
 `src/services/mathCache.ts` `ensureMath(spots, priority)` is the one function both the first
 render and a resume go through:

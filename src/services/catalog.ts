@@ -2,9 +2,9 @@
 // logic and no wiring; src/composition.ts builds the use cases from these functions (see
 // src/core). `substitutemath` renders and stores equations (tiering, the math cache and the
 // priority model live behind it); the fetch functions talk to plato.stanford.edu.
-import { getMeta, setMeta, getMathArticleHtml, updateArticleHtml, putMath } from './db';
+import { getMeta } from './db';
 import { ensureMath } from './mathCache';
-import { mathHash, hash64 } from '../utils/mathKey';
+import { mathHash } from '../utils/mathKey';
 import { mathSlice, MathPriority } from './mathPriority';
 import { extractById, decodeEntities } from '../utils/sepPage';
 import { perf } from './perf';
@@ -81,49 +81,6 @@ export async function substitutemath(html: string, priority: MathPriority | null
     out = out.slice(0, index) + tag + out.slice(index + len);
   }
   return out;
-}
-
-// One-time migration: rewrite articles that have the old inline-base64 format
-// (<math-i>BASE64</math-i>) to the new hash-reference format. Extracts the SVG
-// from each element, stores it in the math table, and replaces the element with
-// a compact hash placeholder. Guarded by a meta key.
-export async function backfillMathHashFormat(): Promise<void> {
-  const done = await getMeta('math_hash_format_v1');
-  if (done) return;
-  const articles = await getMathArticleHtml();
-  const LEGACY_RE = /<math-i([^>]*)>([A-Za-z0-9+/=]+)<\/math-i>/g;
-  for (const article of articles) {
-    await new Promise<void>(r => setTimeout(r, 32));
-    try {
-      let changed = false;
-      // Collect (hash→putMath) outside the synchronous replace callback so we
-      // can await them all before writing the updated HTML. This ensures every
-      // math table row exists before content_html is committed.
-      const puts: Promise<void>[] = [];
-      const updated = article.content_html.replace(LEGACY_RE, (_, attrs, b64) => {
-        try {
-          const svg = atob(b64);
-          const dMatch = attrs.match(/\bd="(\d)"/);
-          const wMatch = attrs.match(/\bw="([\d.]+)"/);
-          const hMatch = attrs.match(/\bh="([\d.]+)"/);
-          const display = dMatch?.[1] === '1';
-          const w = parseFloat(wMatch?.[1] ?? '1') || 1;
-          const h = parseFloat(hMatch?.[1] ?? '1') || 1;
-          // Hash SVG content (TeX unavailable here). Uses the same 64-bit djb2
-          // as mathHash so the key space matches newly-fetched articles.
-          const hash = hash64(svg, display);
-          puts.push(putMath(hash, svg, w, h, display));
-          changed = true;
-          return `<math-i hash="${hash}" d="${display ? '1' : '0'}" w="${w.toFixed(4)}" h="${h.toFixed(4)}"></math-i>`;
-        } catch { return _; }
-      });
-      // Wait for all math rows to land before updating content_html so a
-      // concurrent article open never sees a hash with no matching DB row.
-      await Promise.all(puts.map(p => p.catch(() => {})));
-      if (changed) await updateArticleHtml(article.slug, updated);
-    } catch { }
-  }
-  await setMeta('math_hash_format_v1', '1');
 }
 
 const BASE = 'https://plato.stanford.edu';

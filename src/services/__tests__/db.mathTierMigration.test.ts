@@ -56,7 +56,7 @@ test('same state again: nothing cleared', async () => {
 test('flag turned on: cached content cleared, pending math dropped, stamp updated', async () => {
   await boot({ math_tier_stamp: mathTierStamp(false), tiered_math: '1' });
   expect(cleared()).toBe(true);
-  expect(mockRuns.some(s => s.includes("DELETE FROM meta WHERE key IN ('math_pending'"))).toBe(true);
+  expect(mockRuns.some(s => s.includes("DELETE FROM meta WHERE key = 'math_pending'"))).toBe(true);
   expect(mockMeta.math_tier_stamp).toBe(mathTierStamp(true));
 });
 

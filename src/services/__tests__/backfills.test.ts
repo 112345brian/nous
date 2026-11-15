@@ -3,13 +3,11 @@
 // backfillMathInline that used to be tested here was removed upstream.)
 const mockMeta: Record<string, string> = {};
 const mockEntries: Record<string, string> = {};
-let mockMathArticles: Array<{ slug: string; content_html: string }> = [];
 let mockUncachedAst: string[] = [];
 
 jest.mock('../db', () => ({
   getMeta: jest.fn(async (k: string) => mockMeta[k] ?? null),
   setMeta: jest.fn(async (k: string, v: string) => { mockMeta[k] = v; }),
-  getMathArticleHtml: jest.fn(async () => mockMathArticles),
   getUncachedAstSlugs: jest.fn(async () => mockUncachedAst),
   getEntryHtml: jest.fn(async (slug: string) => mockEntries[slug] ?? null),
   updateArticleHtml: jest.fn(async (slug: string, html: string) => { mockEntries[slug] = html; }),
@@ -39,7 +37,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   for (const k of Object.keys(mockMeta)) delete mockMeta[k];
   for (const k of Object.keys(mockEntries)) delete mockEntries[k];
-  mockMathArticles = []; mockUncachedAst = [];
+  mockUncachedAst = [];
   mockRender.mockImplementation(okRender);
   m.setArticleAst.mockImplementation(async () => {});
 });
