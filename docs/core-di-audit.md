@@ -141,12 +141,11 @@ only after the performance and db sessions have merged, to avoid conflicts.
    delete-versus-modify conflict, so it was left in place and injected. Do it right after
    `tiered-math` merges. `backfillMathHashFormat` and `backfillMathInline` belong with it
    (the second calls `resumePendingMath`); `delete-legacy-compat` may remove them first.
-3. ~~`downloadAll` / `syncCachedArticles`~~ (UC-G1, G2): **done**, see section 4. What is left of
-   this item is the backfills (UC-A4): `backfillAst`, `backfillMathHashFormat`,
-   `backfillMathInline`. `backfillMathInline` is the last thing in `catalog.ts` that calls a
-   converted use case (`resumePendingMath`) and so the last blocker for moving the catalog wiring
-   into the root. The `math-throttle` session is working on it and `delete-legacy-compat` may remove
-   it, so wait for both. The overlap with the idle scheduler (`Scheduler`) is in `App.tsx`, not here.
+3. ~~`downloadAll` / `syncCachedArticles`~~ (UC-G1, G2): **done**, see section 4. What is left
+   of this item is the three backfills (UC-A4), and **they are deliberately not converted yet**;
+   see section 8. In short: two of the three are one-time upgrade code that the project's own
+   prerelease rule says to delete, and the `math-throttle` session is rewriting the scheduling
+   lines of all three.
 4. **Auto-sync decision in `App.tsx`** (lines ~166-171): a duplicated staleness rule
    (`Date.now() - last > days`), same shape as `refreshIndexIfStale` and the InPhO TTL in
    `inpho.ensureInphoIndex`. Extract one pure `isStale(now, last, ttl)` into `utils` and
@@ -268,3 +267,65 @@ Verified against the code. Please fold these into the draft.
 - `scripts/test-download.mjs`, `scripts/buildEntrySeed.js` and `scripts/auditCorpus.cjs`
   carry their own copies of `extractById`, `decodeEntities` and friends (now canonical in
   `src/utils/sepPage.ts`). They can drift.
+
+## 8. The backfills, and what else is in flight (read before merging)
+
+Observed in the other sessions' worktrees (some of it uncommitted, so it may have changed since).
+
+### What each backfill is
+
+| Function | What it does | Kind |
+|---|---|---|
+| `backfillMathHashFormat` | Rewrites articles from an earlier build's inline-base64 `<math-i>` format to hash references. Guarded by meta `math_hash_format_v1`. | Upgrade code. By the rule `delete-legacy-compat` wrote into the changelog ("the app is prerelease with no installs to carry forward"), a deletion candidate. That branch still contains it. |
+| `backfillMathInline` | First calls `resumePendingMath()` (**live**: finishes deferred math interrupted by a kill, every launch), then does a one-time pass (`math_inline_v2`) rendering equations for already-cached articles. The one-time pass exists because "v1 ran before the WebView renderer existed and converted nothing". | Half live, half upgrade code. |
+| `backfillAst` | Pre-parses the AST for cached rows that have none (rows cached before the column existed, or rewritten by a math update: `db.updateArticleHtml` sets `content_ast = NULL`). | Mostly upgrade code; the "rewritten by a math update" case is live. |
+
+All three are scheduled at idle from `App.tsx` (`idleScheduler.schedule(...)`).
+
+### Suspected gap (not verified on a device)
+
+`downloadAll` caches with `skipMath` and its comment says `backfillMathInline` "runs after and
+handles all math articles in one pass". But `backfillMathInline`'s pass is guarded by
+`math_inline_v2`, so it runs once ever, and `skipMath` articles are not recorded in
+`math_pending`. On a first launch with "download everything" the backfill can be scheduled before
+the download finishes. Articles downloaded after the guard is set would then keep their raw TeX
+(the parser shows it as monospace) until something re-renders them. `math-throttle` and
+`common-math-list` work in this area, so check with them before treating it as a bug.
+
+### Overlap with `math-throttle` (uncommitted in its worktree)
+
+It adds a "math priority model": policy `utils/mathThrottlePolicy.ts`, mechanism
+`services/idleScheduler.ts`, wiring `services/mathPriority.ts`. In `catalog.ts` it:
+
+- adds a `priority` parameter to `substitutemath` and `completeArticleMath`, and a `watchStalls`
+  call inside the latter;
+- replaces the `setTimeout` pauses in `resumePendingMath`, `backfillMathInline` and
+  `backfillAst` with `yieldThenMathMayRun('background')`, and makes `backfillMathInline` re-read
+  each article before rendering it;
+- wraps `downloadAll` and `syncCachedArticles` in `withDownloadHold(...)` (renaming the bodies
+  to `...Unheld`), and passes `null` priority from the `awaitMath` path.
+
+Those are exactly the functions this branch moved into `core/mathCompletion.ts`,
+`core/libraryDownload.ts` and `composition.ts`. Git will report them as modify/delete conflicts
+in `catalog.ts`. The semantic port is small:
+
+- `yieldThenMathMayRun('background')` replaces the injected `sleep` in `createMathCompletion` and in
+  the backfills: make the dependency a `pause(): Promise<void>` (the wrapper passes the scheduler
+  call), not a millisecond count.
+- `withDownloadHold(() => ...)` wraps the use case in `composition.ts`, where the two wrappers now
+  live.
+- `priority` becomes an optional argument of `ArticleMath.substitute` and of
+  `MathCompletion.completeArticleMath`.
+
+### Other overlaps
+
+- `delete-legacy-compat` deletes `syncOnLaunch` (its import and call in `App.tsx`, its definition
+  in `dataSync.ts`). This branch rewrote `dataSync.ts`; resolve by deleting the no-op.
+- `tiered-math` changes `substitutemath` (left in `catalog.ts` on purpose).
+- The parent branch (`2fa1958`) has the db merges; this branch does not yet contain them.
+
+### Recommended order
+
+1. Land `math-throttle`, then decide the upgrade-only backfills (`delete-legacy-compat`).
+2. Convert what remains of the backfills on top of the priority model, with the pause injected.
+3. Move the `catalog.ts` wiring into `composition.ts` and delete the RC3 exception.
