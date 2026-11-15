@@ -11,7 +11,7 @@ describe('GRAPH — knowledge graph', () => {
 
   test('GRAPH-03 center node accent fill, larger radius', () => {
     expect(graph()).toMatch(/isCenter/);
-    expect(graph()).toMatch(/#7ba4ff|#5b8ef5/);
+    expect(graph()).toMatch(/#7ba4ff|#5b8ef5|colors\.accent/);
   });
 
   test('GRAPH-04 read vs unread node styling', () =>

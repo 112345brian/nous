@@ -1,8 +1,9 @@
 // Behaviour of catalog.fetchAndCacheArticle for everything except the math modes (those are
 // pinned in deferredMath.test.ts). Written BEFORE the logic moved into src/core and kept
 // unchanged afterwards. db, the renderer and fetch are fakes.
-import { fetchAndCacheArticle } from '../catalog';
+import { fetchAndCacheArticle } from '../../composition';   // wired in the composition root
 import * as db from '../db';
+import { _resetMathCacheState } from '../mathCache';
 import { parseSepHtml } from '../../utils/sepHtml/parse';
 
 jest.mock('../db', () => ({
@@ -11,6 +12,7 @@ jest.mock('../db', () => ({
   getMeta: jest.fn(async () => null),
   setMeta: jest.fn(async () => {}),
   putMathBatch: jest.fn(async () => {}),
+  getMathByHashes: jest.fn(async () => []),
   getEntryHtml: jest.fn(async () => null),
   updateArticleHtml: jest.fn(async () => {}),
   setArticleAst: jest.fn(async () => {}),
@@ -44,6 +46,7 @@ const CONTENT = '<p>The problem of free will is old.</p>';
 
 let fetchMock: jest.Mock;
 beforeEach(() => {
+  _resetMathCacheState();
   jest.clearAllMocks();
   // clearAllMocks keeps implementations, so a rejection set in one test would leak into the next.
   m.cacheArticle.mockImplementation(async () => {});

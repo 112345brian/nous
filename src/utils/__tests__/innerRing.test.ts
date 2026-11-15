@@ -5,9 +5,10 @@
 //                  src/core holds the ports (interfaces) and the use cases that take them as
 //                  parameters; adapters in src/services implement the ports, never the reverse.
 //   outer (I/O):   src/services/**, src/screens/**, src/components/**, src/tests/**, App.tsx
-//   UI render:     src/utils/sepHtml/render/** is React Native UI code that happens to live
-//                  under utils/. It is an OUTER-ring directory, so it is not scanned here,
-//                  and inner-ring files must not import it.
+//   UI under utils: src/utils/sepHtml/render/** is React Native UI code that happens to live
+//                  under utils/, and so are the files in UI_FILES_IN_UTILS. They are OUTER ring,
+//                  so they are not scanned here and inner-ring files must not import them.
+//                  They belong in a ui/ folder; moving them is a separate change.
 //
 // An inner-ring file must not: import from an outer-ring directory (so no concrete adapter
 // such as services/db, expo-sqlite, expo-file-system), import any package other than the
@@ -28,7 +29,8 @@ const ROOT: string = path.join(__dirname, '..', '..', '..');
 const ALLOWED_PACKAGES = new Set(['htmlparser2']);
 // Repo-relative prefixes that belong to the outer ring.
 const OUTER_PREFIXES = [
-  'src/services/', 'src/screens/', 'src/components/', 'src/tests/', 'src/composition',
+  'src/services/', 'src/screens/', 'src/components/', 'src/tests/', 'src/composition', 'src/theme/',
+  'src/utils/motion', 'src/utils/useBackDismiss',
   'src/utils/sepHtml/render/', 'App', 'index',
 ];
 const FORBIDDEN_CALLS = new Set([
@@ -39,6 +41,13 @@ const FORBIDDEN_CTORS = new Set(['XMLHttpRequest', 'WebSocket', 'EventSource', '
 const FORBIDDEN_MEMBERS = new Set(['Date.now', 'performance.now', 'Math.random']);
 
 export interface Violation { file: string; line: number; what: string }
+
+// UI helpers that sit under src/utils but import react / react-native. Each must still do so
+// (checked below), so an entry cannot outlive its reason.
+const UI_FILES_IN_UTILS: Array<{ file: string; reason: string }> = [
+  { file: 'src/utils/motion.ts', reason: 'reads the OS reduce-motion setting via AccessibilityInfo and drives Animated springs; also keeps module-level state' },
+  { file: 'src/utils/useBackDismiss.ts', reason: 'a React hook over react-native BackHandler' },
+];
 
 // Recorded, reasoned exceptions. Each must still match a real violation, or the test below
 // fails, so an exception cannot outlive the code it excuses.
@@ -118,7 +127,7 @@ export function innerRingFiles(): string[] {
       if (ent.isDirectory()) {
         if (ent.name === '__tests__' || rel === 'src/utils/sepHtml/render') continue;
         walk(rel);
-      } else if (/\.(ts|tsx)$/.test(ent.name)) {
+      } else if (/\.(ts|tsx)$/.test(ent.name) && !UI_FILES_IN_UTILS.some(u => u.file === rel)) {
         files.push(rel);
       }
     }
@@ -135,10 +144,11 @@ describe('inner ring has no I/O', () => {
   test('the ring is non-trivial (guards against a silently empty scan)', () => {
     expect(files.length).toBeGreaterThanOrEqual(15);
     for (const f of ['src/types.ts', 'src/utils/forceLayout.ts', 'src/utils/linkifier.ts', 'src/utils/sepHtml/parse.ts',
-      'src/utils/sepPage.ts', 'src/utils/citation.ts', 'src/utils/contentHash.ts', 'src/utils/mathHash.ts',
+      'src/utils/sepPage.ts', 'src/utils/citation.ts', 'src/utils/contentHash.ts', 'src/utils/mathKey.ts',
       'src/core/ports.ts', 'src/core/syncUserData.ts', 'src/core/zotero.ts', 'src/utils/syncPath.ts',
       'src/core/refreshIndex.ts', 'src/utils/sepIndex.ts', 'src/core/cacheArticle.ts', 'src/utils/sepArticlePage.ts',
-      'src/core/mathCompletion.ts', 'src/utils/sepMath.ts', 'src/core/libraryDownload.ts']) {
+      'src/core/mathCompletion.ts', 'src/utils/sepMath.ts', 'src/core/libraryDownload.ts',
+      'src/core/backfills.ts', 'src/core/ensureNotes.ts']) {
       expect(files).toContain(f);
     }
     expect(files).not.toContain('src/utils/sepHtml/render/Blocks.tsx');
@@ -148,6 +158,14 @@ describe('inner ring has no I/O', () => {
     const violations = files.flatMap(f => scanSource(f, fs.readFileSync(path.join(ROOT, f), 'utf8')));
     const unexcused = violations.filter(v => !KNOWN_EXCEPTIONS.some(x => x.file === v.file && x.what === v.what));
     expect(unexcused.map(v => `${v.file}:${v.line} ${v.what}`)).toEqual([]);
+  });
+
+  test('every UI file recorded under utils still imports react or react-native (none are stale)', () => {
+    for (const u of UI_FILES_IN_UTILS) {
+      const text = fs.readFileSync(path.join(ROOT, u.file), 'utf8');
+      expect({ file: u.file, stillUi: /from 'react(-native)?'/.test(text) }).toEqual({ file: u.file, stillUi: true });
+      expect(u.reason.length).toBeGreaterThan(10);
+    }
   });
 
   test('every recorded exception still matches a real violation (none are stale)', () => {

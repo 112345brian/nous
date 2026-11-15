@@ -13,15 +13,18 @@ import {
   getEntryCounts,
 } from '../services/db';
 import type { Prefs } from '../services/db';
-import { downloadAll, syncCachedArticles } from '../composition';
+import { downloadAll, syncCachedArticles, exportToSyncFolder, importFromSyncFolder } from '../composition';
+import { withDownloadHold } from '../services/mathPriority';
 import type { DownloadProgress } from '../types';
-import { exportToSyncFolder, importFromSyncFolder } from '../composition';
 import { importSeedFromUrl } from '../services/seedImport';
 import type { RootStackParamList } from '../../App';
+import { colors, themedStyles, roleMap } from '../theme/tokens';
+import { useScheme, type Appearance } from '../theme/ThemeProvider';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 export default function SettingsScreen() {
+  const { appearance, setAppearance } = useScheme();
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
   const [prefs, setPrefs] = useState<Prefs>({ homeMode: 'search', downloadAll: true, libraryScope: 'all', seedUrl: '' });
@@ -177,7 +180,7 @@ export default function SettingsScreen() {
       async (url) => {
         if (!url?.trim()) return;
         try {
-          await importSeedFromUrl(url.trim(), () => {});
+          await withDownloadHold(() => importSeedFromUrl(url.trim(), () => {}));
           Alert.alert('Done', 'Database imported. Restart the app to apply.');
         } catch (e: any) {
           Alert.alert('Import failed', e?.message ?? 'Unknown error');
@@ -208,7 +211,7 @@ export default function SettingsScreen() {
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top }]}>
-        <TouchableOpacity
+        <TouchableOpacity accessibilityRole="button"
           style={styles.back}
           onPress={() => nav.goBack()}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
@@ -237,7 +240,7 @@ export default function SettingsScreen() {
             <Text style={styles.rowLabel}>Font size</Text>
             <View style={styles.fontSizePicker}>
               {([15, 17, 19, 22] as const).map(px => (
-                <TouchableOpacity
+                <TouchableOpacity accessibilityRole="button"
                   key={px}
                   style={[styles.fontSizeOption, fontSize === px && styles.fontSizeSelected]}
                   onPress={() => updateFontSize(px)}
@@ -249,13 +252,30 @@ export default function SettingsScreen() {
               ))}
             </View>
           </View>
+          <View style={styles.row}>
+            <Text style={styles.rowLabel}>Appearance</Text>
+            <View style={styles.fontSizePicker}>
+              {(['system', 'light', 'dark'] as Appearance[]).map(a => (
+                <TouchableOpacity accessibilityRole="button"
+                  key={a}
+                  accessibilityState={{ selected: appearance === a }}
+                  style={[styles.fontSizeOption, styles.appearanceOption, appearance === a && styles.fontSizeSelected]}
+                  onPress={() => setAppearance(a)}
+                >
+                  <Text style={[styles.fontSizeLabel, appearance === a && styles.fontSizeLabelSelected]}>
+                    {a === 'system' ? 'Auto' : a === 'light' ? 'Light' : 'Dark'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
           <View style={styles.cssBlock}>
             <TextInput
               style={styles.cssInput}
               value={customCss}
               onChangeText={setCustomCss}
               placeholder={'/* override any reading styles */\nbody { font-family: "Palatino", serif; }'}
-              placeholderTextColor="#3a3a3a"
+              placeholderTextColor={colors.textMuted}
               multiline
               autoCorrect={false}
               autoCapitalize="none"
@@ -280,7 +300,7 @@ export default function SettingsScreen() {
               value={zoteroId}
               onChangeText={setZoteroId}
               placeholder="12345678"
-              placeholderTextColor="#3a3a3a"
+              placeholderTextColor={colors.textMuted}
               keyboardType="number-pad"
               autoCorrect={false}
             />
@@ -292,7 +312,7 @@ export default function SettingsScreen() {
               value={zoteroKey}
               onChangeText={setZoteroKey}
               placeholder="your-api-key"
-              placeholderTextColor="#3a3a3a"
+              placeholderTextColor={colors.textMuted}
               autoCorrect={false}
               autoCapitalize="none"
               secureTextEntry
@@ -310,7 +330,7 @@ export default function SettingsScreen() {
               value={syncFolder}
               onChangeText={setSyncFolderState}
               placeholder={Platform.OS === 'macos' ? '~/Documents/Nous/' : '/sdcard/Nous/'}
-              placeholderTextColor="#3a3a3a"
+              placeholderTextColor={colors.textMuted}
               autoCorrect={false}
               autoCapitalize="none"
             />
@@ -327,7 +347,7 @@ export default function SettingsScreen() {
             <Text style={[styles.rowLabel, { marginRight: 12 }]}>Sources</Text>
             <View style={scopeStyles.row}>
               {(['all', 'sep', 'owl'] as const).map(s => (
-                <TouchableOpacity
+                <TouchableOpacity accessibilityRole="button"
                   key={s}
                   style={[scopeStyles.chip, prefs.libraryScope === s && scopeStyles.chipActive]}
                   onPress={() => updatePref('libraryScope', s)}
@@ -346,17 +366,17 @@ export default function SettingsScreen() {
           {dlProgress ? (
             <>
               <Row label="Downloading" value={`${dlProgress.done.toLocaleString()} / ${Math.max(dlProgress.total, 1).toLocaleString()}`} />
-              <TouchableOpacity style={[styles.row, styles.rowLast]} onPress={cancelDownload} activeOpacity={0.7}>
+              <TouchableOpacity accessibilityRole="button" style={[styles.row, styles.rowLast]} onPress={cancelDownload} activeOpacity={0.7}>
                 <Text style={styles.destructiveLabel}>Cancel download</Text>
               </TouchableOpacity>
             </>
           ) : (
-            <TouchableOpacity style={styles.row} onPress={handleDownloadAll} activeOpacity={0.7}>
+            <TouchableOpacity accessibilityRole="button" style={styles.row} onPress={handleDownloadAll} activeOpacity={0.7}>
               <Text style={styles.rowLabel}>Download all articles</Text>
               <Text style={styles.rowValue}>{(totalCount - cachedCount).toLocaleString()} remaining</Text>
             </TouchableOpacity>
           )}
-          <TouchableOpacity style={[styles.row, styles.rowLast]} onPress={handleSeedFromUrl} activeOpacity={0.7}>
+          <TouchableOpacity accessibilityRole="button" style={[styles.row, styles.rowLast]} onPress={handleSeedFromUrl} activeOpacity={0.7}>
             <Text style={styles.rowLabel}>Import database from URL</Text>
           </TouchableOpacity>
         </Section>
@@ -372,21 +392,21 @@ export default function SettingsScreen() {
 
         {/* Storage */}
         <Section title="Storage">
-          <TouchableOpacity style={[styles.row, styles.rowLast]} onPress={confirmClearCache} activeOpacity={0.7}>
+          <TouchableOpacity accessibilityRole="button" style={[styles.row, styles.rowLast]} onPress={confirmClearCache} activeOpacity={0.7}>
             <Text style={styles.destructiveLabel}>Clear article cache</Text>
           </TouchableOpacity>
         </Section>
 
         {/* Credits */}
         <Section title="Credits">
-          <TouchableOpacity style={styles.row} onPress={() => Linking.openURL('https://plato.stanford.edu')} activeOpacity={0.7}>
+          <TouchableOpacity accessibilityRole="button" style={styles.row} onPress={() => Linking.openURL('https://plato.stanford.edu')} activeOpacity={0.7}>
             <View style={styles.supportTextWrap}>
               <Text style={styles.rowLabel}>Stanford Encyclopedia of Philosophy</Text>
               <Text style={styles.supportSub}>Suggested content source</Text>
             </View>
             <Text style={styles.rowValue}>↗</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.row, styles.rowLast]} onPress={() => Linking.openURL('https://www.inphoproject.org')} activeOpacity={0.7}>
+          <TouchableOpacity accessibilityRole="button" style={[styles.row, styles.rowLast]} onPress={() => Linking.openURL('https://www.inphoproject.org')} activeOpacity={0.7}>
             <View style={styles.supportTextWrap}>
               <Text style={styles.rowLabel}>InPhO, Indiana University</Text>
               <Text style={styles.supportSub}>Suggested semantic graph</Text>
@@ -397,14 +417,14 @@ export default function SettingsScreen() {
 
         {/* Support */}
         <Section title="Support">
-          <TouchableOpacity style={styles.row} onPress={() => Linking.openURL('https://plato.stanford.edu/support/')} activeOpacity={0.7}>
+          <TouchableOpacity accessibilityRole="button" style={styles.row} onPress={() => Linking.openURL('https://plato.stanford.edu/support/')} activeOpacity={0.7}>
             <View style={styles.supportTextWrap}>
               <Text style={styles.rowLabel}>Donate to the SEP</Text>
               <Text style={styles.supportSub}>Support them!</Text>
             </View>
             <Text style={styles.rowValue}>↗</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.row, styles.rowLast]} onPress={() => Linking.openURL('https://ko-fi.com/112345brian')} activeOpacity={0.7}>
+          <TouchableOpacity accessibilityRole="button" style={[styles.row, styles.rowLast]} onPress={() => Linking.openURL('https://ko-fi.com/112345brian')} activeOpacity={0.7}>
             <View style={styles.supportTextWrap}>
               <Text style={styles.rowLabel}>Buy me a coffee</Text>
               <Text style={styles.supportSub}>If you have anything left over</Text>
@@ -431,7 +451,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function OptionRow({ label, selected, onPress, last }: { label: string; selected: boolean; onPress: () => void; last?: boolean }) {
   return (
-    <TouchableOpacity style={[styles.row, last && styles.rowLast]} onPress={onPress} activeOpacity={0.7}>
+    <TouchableOpacity accessibilityRole="button" style={[styles.row, last && styles.rowLast]} onPress={onPress} activeOpacity={0.7}>
       <Text style={styles.rowLabel}>{label}</Text>
       {selected && <Text style={styles.checkmark}>✓</Text>}
     </TouchableOpacity>
@@ -440,7 +460,7 @@ function OptionRow({ label, selected, onPress, last }: { label: string; selected
 
 function ActionRow({ label, onPress, accent, last, destructive }: { label: string; onPress: () => void; accent?: boolean; last?: boolean; destructive?: boolean }) {
   return (
-    <TouchableOpacity style={[styles.row, last && styles.rowLast]} onPress={onPress} activeOpacity={0.6}>
+    <TouchableOpacity accessibilityRole="button" style={[styles.row, last && styles.rowLast]} onPress={onPress} activeOpacity={0.6}>
       <Text style={[styles.actionLabel, accent && styles.actionAccent, destructive && styles.destructiveLabel]}>{label}</Text>
     </TouchableOpacity>
   );
@@ -455,18 +475,18 @@ function Row({ label, value, last }: { label: string; value: string; last?: bool
   );
 }
 
-const S = {
-  bg:       '#111111',
-  surface:  '#1c1c1c',
-  border:   '#252525',
-  text:     '#e0e0e0',
-  textDim:  '#999999',
-  textHint: '#5a5a5a',
-  accent:   '#7ba4ff',
-  red:      '#ff6b6b',
-};
+const S = roleMap({
+  bg: 'bg',
+  surface: 'surface',
+  border: 'borderSubtle',
+  text: 'text',
+  textDim: 'textMuted',
+  textHint: 'textMuted',
+  accent: 'accentSoft',
+  red: 'danger',
+});
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   root: { flex: 1, backgroundColor: S.bg },
   header: {
     flexDirection: 'row', alignItems: 'flex-end',
@@ -518,15 +538,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20, paddingTop: 6, paddingBottom: 4,
   },
   version: { color: S.textHint, fontSize: 12, textAlign: 'center', marginTop: 40 },
-  attribution: { color: '#333', fontSize: 11, textAlign: 'center', marginTop: 6 },
-  attributionUrl: { color: '#2e2e2e', fontSize: 10, textAlign: 'center', marginTop: 2, marginBottom: 8 },
+  attribution: { color: colors.textMuted, fontSize: 11, textAlign: 'center', marginTop: 6 },
+  attributionUrl: { color: colors.textMuted, fontSize: 11, textAlign: 'center', marginTop: 2, marginBottom: 8 },
 
   fontSizePicker: { flexDirection: 'row', gap: 6 },
   fontSizeOption: {
     width: 38, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
     backgroundColor: S.bg, borderWidth: 1, borderColor: S.border,
   },
-  fontSizeSelected: { backgroundColor: '#162040', borderColor: S.accent },
+  appearanceOption: { width: 54 },
+  fontSizeSelected: { backgroundColor: colors.accentWash, borderColor: S.accent },
   fontSizeLabel: { color: S.textDim, fontSize: 13, fontWeight: '600' },
   fontSizeLabelSelected: { color: S.accent },
 
@@ -535,27 +556,27 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: S.border,
   },
   cssInput: {
-    minHeight: 110, backgroundColor: '#0d0d0d', borderRadius: 8,
-    borderWidth: 1, borderColor: '#252525',
-    color: '#bdbdbd', fontSize: 12, padding: 10,
+    minHeight: 110, backgroundColor: colors.bg, borderRadius: 8,
+    borderWidth: 1, borderColor: colors.borderSubtle,
+    color: colors.textSecondary, fontSize: 12, padding: 10,
     fontFamily: Platform.OS === 'ios' || Platform.OS === 'macos' ? 'Menlo' : 'monospace',
     lineHeight: 18, textAlignVertical: 'top',
   },
   cssRef: {
-    color: '#404040', fontSize: 11, lineHeight: 16,
+    color: colors.textMuted, fontSize: 11, lineHeight: 16,
     paddingTop: 8, paddingBottom: 6,
     fontFamily: Platform.OS === 'ios' || Platform.OS === 'macos' ? 'Menlo' : 'monospace',
   },
-});
+}));
 
-const scopeStyles = StyleSheet.create({
+const scopeStyles = themedStyles(() => StyleSheet.create({
   row: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', flex: 1 },
   chip: {
     paddingHorizontal: 10, paddingVertical: 5,
     borderRadius: 14, borderWidth: 1,
     borderColor: S.border, backgroundColor: S.bg,
   },
-  chipActive: { borderColor: S.accent, backgroundColor: '#162040' },
+  chipActive: { borderColor: S.accent, backgroundColor: colors.accentWash },
   chipText: { color: S.textDim, fontSize: 13, fontWeight: '500' },
   chipTextActive: { color: S.accent },
-});
+}));

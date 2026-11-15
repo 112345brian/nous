@@ -44,7 +44,9 @@ export async function fetchAndCacheArticle(
     // Substitute math unless caller opted out (bulk download defers to the math backfill).
     const deferMath = hasMath && !opts.skipMath && !opts.awaitMath;
     const finalHtml = hasMath && !opts.skipMath && opts.awaitMath
-      ? await timing.time(slug, 'math', () => math.substitute(linkedHtml))
+      // awaitMath callers (the bulk sync) run under their own download hold: gating on the
+      // priority model here would wait for the hold to end, so render with no priority.
+      ? await timing.time(slug, 'math', () => math.substitute(linkedHtml, null))
       : linkedHtml;
     // Footnote text lives on a sibling notes.html page; fetch it so footnotes
     // resolve offline. Only when the body actually references it.

@@ -1,4 +1,5 @@
 import type { EntryRef, EntryRow, IndexEntry, LibraryScope } from '../types';
+import type { MathPriority } from '../utils/mathThrottlePolicy';
 
 // Ports: the outward-facing interfaces the core needs. Plain TypeScript only.
 //
@@ -77,8 +78,12 @@ export interface ArticleLibrary {
 
 /** Turns TeX in an article into stored SVG equations. */
 export interface ArticleMath {
-  /** Render every equation in `html` now; resolves to the HTML with <math-i> references. */
-  substitute(html: string): Promise<string>;
+  /**
+   * Render every equation in `html` now; resolves to the HTML with <math-i> references.
+   * `priority` says how patiently to render (see the math priority model); `null` means the
+   * caller already owns the schedule, so the renderer must not wait on it.
+   */
+  substitute(html: string, priority?: MathPriority | null): Promise<string>;
   /** Render this cached article's equations in the background and rewrite it when done. Does not wait. */
   completeLater(slug: string, html: string): void;
 }
@@ -118,3 +123,17 @@ export interface LibraryCacheStatus {
   /** Every cached entry (all scopes). */
   getCachedSlugs(): Promise<EntryRef[]>;
 }
+
+/** Work lists for the one-time background passes over cached articles. */
+export interface LibraryBackfillStore {
+  /** Cached articles that contain TeX, with the body as it was when listed. */
+  getMathArticleHtml(): Promise<Array<{ slug: string; content_html: string }>>;
+  /** Slugs of cached articles that have no stored AST yet. */
+  getUncachedAstSlugs(): Promise<string[]>;
+}
+
+/** Where an article's footnotes are stored. */
+export interface NotesStore {
+  setEntryNotes(slug: string, notesHtml: string): Promise<void>;
+}
+

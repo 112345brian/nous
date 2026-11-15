@@ -8,21 +8,26 @@
 // pipeline can be run with fakes. The renderer and the equation store stay behind the
 // injected `substitute` function.
 import type { ArticleMathStore, KeyValueStore } from './ports';
+import type { MathPriority } from '../utils/mathThrottlePolicy';
 import { parseSepHtml } from '../utils/sepHtml/parse';
 import { hasTexSpan } from '../utils/sepMath';
 
 export const MATH_PENDING_KEY = 'math_pending';
-/** Pause between articles when resuming, so the UI thread gets a turn. */
-const RESUME_YIELD_MS = 32;
-
 export type MathReadyListener = (slug: string) => void;
 
 export interface MathCompletionDeps {
   /** Render every equation in `html` and return it with <math-i> references (stores the SVGs). */
-  substitute(html: string): Promise<string>;
+  substitute(html: string, priority: MathPriority): Promise<string>;
   articles: ArticleMathStore;
   meta: KeyValueStore;
-  sleep(ms: number): Promise<void>;
+  /**
+   * A pause between units of background work, then wait until work of this priority may run
+   * (the reader is quiet, no download hold). The wrapper passes the priority model's
+   * yieldThenMathMayRun, so resuming yields to reading.
+   */
+  pause(priority: MathPriority): Promise<void>;
+  /** Dev-only: start watching a unit of work for stalls; returns the function that stops the watch. */
+  watchStall?(label: string): () => void;
 }
 
 export interface MathCompletion {
@@ -33,8 +38,9 @@ export interface MathCompletion {
    * `html` may be passed when the caller already holds it (skips a read).
    * Resolves true when the article no longer needs math work; false when the renderer
    * made no progress (it stays pending and is retried at next launch). Never rejects.
+   * `priority` defaults to 'current' (the reader is waiting on this article).
    */
-  completeArticleMath(slug: string, html?: string): Promise<boolean>;
+  completeArticleMath(slug: string, html?: string, priority?: MathPriority): Promise<boolean>;
   /** Finish math for articles whose deferred render never completed. Sequential, yielding between articles. */
   resumePendingMath(): Promise<void>;
   /**
@@ -45,7 +51,7 @@ export interface MathCompletion {
 }
 
 export function createMathCompletion(deps: MathCompletionDeps): MathCompletion {
-  const { substitute, articles, meta, sleep } = deps;
+  const { substitute, articles, meta, pause, watchStall } = deps;
 
   let pendingChain: Promise<void> = Promise.resolve();
   const listeners = new Set<MathReadyListener>();
@@ -71,14 +77,15 @@ export function createMathCompletion(deps: MathCompletionDeps): MathCompletion {
     return () => { listeners.delete(cb); };
   }
 
-  function completeArticleMath(slug: string, html?: string): Promise<boolean> {
+  function completeArticleMath(slug: string, html?: string, priority: MathPriority = 'current'): Promise<boolean> {
     const existing = inFlight.get(slug);
     if (existing) return existing;
+    const stopWatch = watchStall?.(`math:${slug}`);
     const p = (async () => {
       try {
         const src = html ?? (await articles.getEntryHtml(slug));
         if (!src) return false;
-        const updated = await substitute(src);
+        const updated = await substitute(src, priority);
         if (updated === src) {
           // Nothing converted. Fine if there was no TeX; otherwise the renderer
           // timed out — keep it pending.
@@ -94,6 +101,7 @@ export function createMathCompletion(deps: MathCompletionDeps): MathCompletion {
         return false;
       } finally {
         inFlight.delete(slug);
+        stopWatch?.();
       }
     })();
     inFlight.set(slug, p);
@@ -109,8 +117,9 @@ export function createMathCompletion(deps: MathCompletionDeps): MathCompletion {
       return;
     }
     for (const slug of slugs) {
-      await sleep(RESUME_YIELD_MS);
-      await completeArticleMath(slug);
+      // One article per unit; stops here (the slug stays pending) while the reader is active.
+      await pause('background');
+      await completeArticleMath(slug, undefined, 'background');
     }
   }
 

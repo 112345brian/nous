@@ -2,8 +2,9 @@
 // completeArticleMath, resumePendingMath, fetchAndCacheArticle). Complements
 // deferredMath.test.ts, which pins the main flow. Written BEFORE the state machine moved into
 // src/core/mathCompletion.ts and kept unchanged afterwards. db and the renderer are fakes.
-import { completeArticleMath, onMathReady, resumePendingMath, fetchAndCacheArticle } from '../catalog';
+import { completeArticleMath, onMathReady, resumePendingMath, fetchAndCacheArticle } from '../../composition';   // wired in the composition root
 import * as db from '../db';
+import { _resetMathCacheState } from '../mathCache';
 import { parseSepHtml } from '../../utils/sepHtml/parse';
 
 const mockMeta: Record<string, string> = {};
@@ -19,6 +20,7 @@ jest.mock('../db', () => ({
   updateArticleHtml: jest.fn(async (slug: string, html: string) => { mockEntries[slug] = html; }),
   setArticleAst: jest.fn(async () => {}),
   putMathBatch: jest.fn(async () => {}),
+  getMathByHashes: jest.fn(async () => []),
 }));
 const mockRender = jest.fn();
 jest.mock('../mathRender', () => ({ renderMathBatch: (...a: unknown[]) => mockRender(...a) }));
@@ -32,6 +34,7 @@ const pending = () => JSON.parse(mockMeta.math_pending ?? '[]') as string[];
 const tick = () => new Promise<void>(r => setTimeout(r, 0));
 
 beforeEach(() => {
+  _resetMathCacheState();
   jest.clearAllMocks();
   for (const k of Object.keys(mockMeta)) delete mockMeta[k];
   for (const k of Object.keys(mockEntries)) delete mockEntries[k];
@@ -160,14 +163,16 @@ describe('resumePendingMath', () => {
     expect(pending()).toEqual(['missing']);
   });
 
-  test('it pauses between articles (a timer, so it yields to the UI)', async () => {
+  // Before the math priority model this paused a fixed 32 ms; it now yields to the model
+  // (yieldThenMathMayRun), whose gating policy is covered in mathPriority.test.ts.
+  test('it yields to the event loop before each article instead of starting at once', async () => {
     jest.useFakeTimers();
     mockMeta.math_pending = JSON.stringify(['a']);
     mockEntries.a = TEX;
     const p = resumePendingMath();
-    await jest.advanceTimersByTimeAsync(31);
+    for (let i = 0; i < 5; i++) await Promise.resolve();
     expect(m.updateArticleHtml).not.toHaveBeenCalled();
-    await jest.advanceTimersByTimeAsync(1);
+    await jest.runAllTimersAsync();
     await p;
     expect(m.updateArticleHtml).toHaveBeenCalledTimes(1);
     jest.useRealTimers();

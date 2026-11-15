@@ -4,6 +4,7 @@
 // pipeline; db, fetch, the renderer and the clock are fakes.
 import { downloadAll, syncCachedArticles } from '../../composition';
 import * as db from '../db';
+import { _resetMathCacheState } from '../mathCache';
 
 const mockMeta: Record<string, string> = {};
 jest.mock('../db', () => ({
@@ -22,6 +23,7 @@ jest.mock('../db', () => ({
   updateArticleHtml: jest.fn(async () => {}),
   setArticleAst: jest.fn(async () => {}),
   putMathBatch: jest.fn(async () => {}),
+  getMathByHashes: jest.fn(async () => []),
 }));
 const mockRender = jest.fn();
 jest.mock('../mathRender', () => ({ renderMathBatch: (...a: unknown[]) => mockRender(...a) }));
@@ -53,6 +55,7 @@ function gatedFetch() {
 const progress = () => { const calls: Array<{ done: number; total: number; current: string }> = []; return { calls, fn: (p: { done: number; total: number; current: string }) => { calls.push(p); } }; };
 
 beforeEach(() => {
+  _resetMathCacheState();
   jest.clearAllMocks();
   jest.useFakeTimers().setSystemTime(NOW);
   for (const k of Object.keys(mockMeta)) delete mockMeta[k];

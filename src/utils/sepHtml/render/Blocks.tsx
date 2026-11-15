@@ -4,9 +4,7 @@ import type { Block, Inline } from '../types';
 import type { Annotation } from '../../../types';
 import { SvgXml } from 'react-native-svg';
 import { InlineContent, InlineHandlers, hasMath, type Highlight } from './Inline';
-import { SEP_BASE_FONT, SEP_COLORS, sepBlock, sepMutedText, sepText } from './theme';
-
-const PX_PER_EX = SEP_BASE_FONT / 2;
+import { SEP_COLORS, useSepTheme } from './theme';
 
 export interface BlockHandlers extends InlineHandlers {
   onHeadingLayout?: (id: string, y: number) => void;
@@ -109,6 +107,8 @@ function Blocks({ blocks, h, keyPrefix = 'b' }: { blocks: Block[]; h: BlockHandl
 }
 
 export const BlockView = React.memo(function BlockView({ block, h, suppressTopBorder }: { block: Block; h: BlockHandlers; suppressTopBorder?: boolean }) {
+  const t = useSepTheme();
+  const { text: sepText, block: sepBlock } = t;
   switch (block.t) {
     case 'heading': {
       const style = block.level === 2 ? sepText.h2 : block.level === 3 ? sepText.h3 : sepText.h4;
@@ -154,8 +154,8 @@ export const BlockView = React.memo(function BlockView({ block, h, suppressTopBo
         block.children.forEach((c, i) => {
           if ((c.t === 'mathsvg' || c.t === 'mathref') && c.display) {
             flush(`r${i}`);
-            const w = Math.max(1, Math.round(c.w * PX_PER_EX));
-            const mh = Math.max(1, Math.round(c.h * PX_PER_EX));
+            const w = Math.max(1, Math.round(c.w * t.pxPerEx));
+            const mh = Math.max(1, Math.round(c.h * t.pxPerEx));
             const svg = c.t === 'mathsvg' ? c.svg : h.mathSvgs?.[c.hash];
             segments.push(
               <View key={`dm${i}`} style={{ alignItems: 'center', width: '100%', marginVertical: 14 }}>
@@ -196,7 +196,7 @@ export const BlockView = React.memo(function BlockView({ block, h, suppressTopBo
       // Inner paragraphs render muted + slightly smaller (readerCss blockquote).
       return (
         <View style={sepBlock.blockquote}>
-          <Blocks blocks={block.children} h={{ ...h, textStyle: sepMutedText }} />
+          <Blocks blocks={block.children} h={{ ...h, textStyle: t.muted }} />
         </View>
       );
     case 'list': {

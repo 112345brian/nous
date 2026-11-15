@@ -6,178 +6,89 @@ import { formatCitation } from '../utils/citation';
 
 // Re-exported so existing callers (screens, on-device tests) keep importing from services/db.
 export { contentHash, formatCitation };
+import { mathTierStamp, TIERED_MATH_DEFAULT } from '../utils/mathTier';
+import { CORE_MIGRATIONS } from './coreMigrations';
+import { runMigrations, userVersionStore } from './migrations';
+import { secretsAvailable, getSecret, setSecret, deleteSecret } from './secureSecrets';
+import { mergeAnnotation, newUid } from './annotationMerge';
+import { mergeRead } from './readsMerge';
 
-let _db: SQLite.SQLiteDatabase | null = null;
+// One shared connection. getDb() caches the *promise* of an opened-and-migrated
+// database, so concurrent callers share a single open and none can observe a
+// handle whose schema is still being built. closeDb() waits for any in-flight
+// open, and getDb() waits for any in-flight close before opening again.
+let _open: Promise<SQLite.SQLiteDatabase> | null = null;
+let _closing: Promise<void> | null = null;
+
+// Tiered math: which math pipeline produced the cached articles. When the
+// effective on/off state or MATH_TIER_VERSION changes, clear cached article
+// content so everything re-fetches and re-processes. Not a versioned migration:
+// it depends on launch-time state (the `tiered_math` meta pref overrides
+// TIERED_MATH_DEFAULT), so it must be able to run again after a flag flip.
+async function applyMathTierStamp(db: SQLite.SQLiteDatabase): Promise<void> {
+  const tierPref = await db.getFirstAsync<{ value: string }>(`SELECT value FROM meta WHERE key = 'tiered_math'`);
+  const tierStamp = mathTierStamp(tierPref ? tierPref.value === '1' : TIERED_MATH_DEFAULT);
+  const tierSeen = await db.getFirstAsync<{ value: string }>(`SELECT value FROM meta WHERE key = 'math_tier_stamp'`);
+  if (tierSeen?.value === tierStamp) return;
+  if (tierSeen) {
+    await db.runAsync(
+      `UPDATE entries SET content_html = NULL, preamble_html = NULL, toc_html = NULL, notes_html = NULL,
+       content_ast = NULL, excerpt = NULL, cached_at = NULL WHERE cached_at IS NOT NULL`
+    );
+    await db.runAsync(`DELETE FROM meta WHERE key IN ('math_pending', 'math_inline_v2', 'math_hash_format_v1')`);
+  }
+  await db.runAsync(`INSERT OR REPLACE INTO meta (key, value) VALUES ('math_tier_stamp', ?)`, [tierStamp]);
+}
+
+async function openAndMigrate(): Promise<SQLite.SQLiteDatabase> {
+  const db = await SQLite.openDatabaseAsync('sep.db');
+  try {
+    // Outside any transaction: SQLite cannot change the journal mode inside one.
+    await db.execAsync('PRAGMA journal_mode = WAL;');
+    await runMigrations(db, CORE_MIGRATIONS, userVersionStore);
+    await applyMathTierStamp(db);
+  } catch (e) {
+    await db.closeAsync().catch(() => {});
+    throw e;
+  }
+  return db;
+}
 
 // Exported so feature modules that own their own tables (e.g. services/graphDb.ts)
 // can share the single app DB connection rather than opening their own.
 export async function getDb(): Promise<SQLite.SQLiteDatabase> {
-  if (_db) return _db;
-  _db = await SQLite.openDatabaseAsync('sep.db');
-  await initSchema(_db);
-  return _db;
+  while (_closing) await _closing.catch(() => {});
+  if (!_open) {
+    const opening = openAndMigrate();
+    _open = opening;
+    // A failed open or migration must not be cached: the next caller retries.
+    opening.catch(() => { if (_open === opening) _open = null; });
+  }
+  return _open;
 }
 
 // Used by seedImport — closes the connection so the DB file can be replaced.
+// Resolves once the file is released; a getDb() issued meanwhile waits and then
+// opens the (possibly replaced) file afresh.
 export async function closeDb(): Promise<void> {
-  if (_db) {
-    await _db.closeAsync();
-    _db = null;
-  }
-}
-
-async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
-  await db.execAsync(`
-    PRAGMA journal_mode = WAL;
-
-    CREATE TABLE IF NOT EXISTS entries (
-      slug         TEXT PRIMARY KEY,
-      title        TEXT NOT NULL,
-      parent_label TEXT,
-      source       TEXT NOT NULL DEFAULT 'sep',
-      author       TEXT,
-      pub_date     TEXT,
-      content_hash TEXT,
-      toc_html     TEXT,
-      preamble_html TEXT,
-      content_html TEXT,
-      notes_html   TEXT,
-      word_count   INTEGER DEFAULT 0,
-      read_progress REAL DEFAULT 0,
-      excerpt      TEXT,
-      cached_at    INTEGER
-    );
-
-    CREATE TABLE IF NOT EXISTS reads (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      slug       TEXT NOT NULL,
-      title      TEXT NOT NULL,
-      visited_at INTEGER NOT NULL,
-      from_slug  TEXT,
-      session_id TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS meta (
-      key   TEXT PRIMARY KEY,
-      value TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS bookmarks (
-      slug      TEXT PRIMARY KEY,
-      title     TEXT NOT NULL,
-      saved_at  INTEGER NOT NULL,
-      notes     TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS links (
-      from_slug TEXT NOT NULL,
-      to_slug   TEXT NOT NULL,
-      PRIMARY KEY (from_slug, to_slug)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_links_to_slug ON links(to_slug);
-
-    CREATE TABLE IF NOT EXISTS article_versions (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      slug         TEXT NOT NULL,
-      content_hash TEXT NOT NULL,
-      cached_at    INTEGER NOT NULL,
-      UNIQUE(slug, content_hash)
-    );
-
-    CREATE TABLE IF NOT EXISTS annotations (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      slug          TEXT NOT NULL,
-      selected_text TEXT NOT NULL,
-      context       TEXT,
-      note          TEXT,
-      color         TEXT NOT NULL DEFAULT '#FFE566',
-      content_hash  TEXT,
-      created_at    INTEGER NOT NULL,
-      updated_at    INTEGER NOT NULL
-    );
-
-    -- NOTE: the InPhO semantic-graph tables (inpho_nodes, inpho_relations) are
-    -- owned by services/graphDb.ts, which lazily creates them the first time the
-    -- graph feature is used. Keeping that schema out of the core reader DB keeps
-    -- the graph an optional, self-contained module.
-
-    -- Client-rendered math cache. Each row is a TeX equation rendered to SVG
-    -- ON THIS DEVICE (mathStore.ts / texToSvg.ts) from article TeX the user
-    -- fetched. This is a runtime artifact and is NEVER bundled or shipped — see
-    -- NOTICE.md. hash = mathStore.mathHash(tex, display); d = display flag.
-    CREATE TABLE IF NOT EXISTS math (
-      hash TEXT PRIMARY KEY,
-      svg  TEXT NOT NULL,
-      w    REAL,
-      h    REAL,
-      d    INTEGER NOT NULL DEFAULT 0
-    );
-
-  `);
-
-  // Column migrations — no-op if columns already exist
-  await Promise.all([
-    db.runAsync('ALTER TABLE entries ADD COLUMN pub_date TEXT').catch(() => {}),
-    db.runAsync('ALTER TABLE entries ADD COLUMN content_hash TEXT').catch(() => {}),
-    db.runAsync('ALTER TABLE bookmarks ADD COLUMN notes TEXT').catch(() => {}),
-    db.runAsync('ALTER TABLE annotations ADD COLUMN content_hash TEXT').catch(() => {}),
-    db.runAsync('ALTER TABLE entries ADD COLUMN read_progress REAL DEFAULT 0').catch(() => {}),
-    db.runAsync('ALTER TABLE entries ADD COLUMN excerpt TEXT').catch(() => {}),
-    db.runAsync('ALTER TABLE entries ADD COLUMN parent_label TEXT').catch(() => {}),
-    db.runAsync("ALTER TABLE entries ADD COLUMN source TEXT NOT NULL DEFAULT 'sep'").catch(() => {}),
-    db.runAsync('ALTER TABLE entries ADD COLUMN has_math INTEGER DEFAULT 0').catch(() => {}),
-    db.runAsync('ALTER TABLE entries ADD COLUMN content_ast TEXT').catch(() => {}),
-    db.runAsync('ALTER TABLE entries ADD COLUMN notes_html TEXT').catch(() => {}),
-  ]);
-
-  // One-time migration: clear articles cached before preamble_html column existed
-  // so they re-fetch with the corrected parser (title/preamble no longer embedded in content_html).
-  const didClear = await db.getFirstAsync<{ value: string }>(
-    `SELECT value FROM meta WHERE key = 'migrated_clear_cache_v2'`
-  );
-  if (!didClear) {
-    await db.runAsync(
-      `UPDATE entries SET content_html = NULL, preamble_html = NULL, toc_html = NULL,
-       excerpt = NULL, cached_at = NULL WHERE cached_at IS NOT NULL`
-    );
-    await db.runAsync(
-      `INSERT OR REPLACE INTO meta (key, value) VALUES ('migrated_clear_cache_v2', '1')`
-    );
-  }
-
-  // Parser version: bump when the native HTML parser changes the stored AST in a
-  // user-visible way (e.g. bracket-free footnote refs → fnref). Clearing
-  // content_ast forces cached articles to re-parse with the current parser on
-  // next open, rather than rendering a stale AST frozen at download time.
-  const PARSER_VERSION = '2';
-  const astVer = await db.getFirstAsync<{ value: string }>(
-    `SELECT value FROM meta WHERE key = 'ast_parser_version'`
-  );
-  if (astVer?.value !== PARSER_VERSION) {
-    await db.runAsync('UPDATE entries SET content_ast = NULL');
-    await db.runAsync(
-      `INSERT OR REPLACE INTO meta (key, value) VALUES ('ast_parser_version', ?)`,
-      [PARSER_VERSION]
-    );
-  }
-
-  // Migrate FTS from content-table to standalone if needed, then ensure it exists
-  const ftsInfo = await db.getFirstAsync<{ sql: string }>(
-    `SELECT sql FROM sqlite_master WHERE type='table' AND name='entries_fts'`
-  );
-  const needsCreate = !ftsInfo || ftsInfo.sql?.includes("content='entries'");
-  if (needsCreate) {
-    await db.runAsync('DROP TABLE IF EXISTS entries_fts');
-    await db.runAsync(`
-      CREATE VIRTUAL TABLE entries_fts USING fts5(
-        slug UNINDEXED,
-        title,
-        tokenize='porter ascii'
-      )
-    `);
-    // Populate from existing entries
-    await db.runAsync(`INSERT INTO entries_fts(slug, title) SELECT slug, title FROM entries`);
+  while (_closing) await _closing.catch(() => {});
+  const opening = _open;
+  if (!opening) return;
+  _open = null;
+  const closing = (async () => {
+    let db: SQLite.SQLiteDatabase;
+    try {
+      db = await opening;
+    } catch {
+      return; // the open failed; there is no handle to close
+    }
+    await db.closeAsync();
+  })();
+  _closing = closing;
+  try {
+    await closing;
+  } finally {
+    if (_closing === closing) _closing = null;
   }
 }
 
@@ -189,11 +100,22 @@ export async function getEntryCount(): Promise<number> {
   return row?.count ?? 0;
 }
 
+// Library scope filter, bound as a parameter. `scope` is typed as a closed union
+// but not guaranteed at runtime: getPrefs casts an untyped meta string, and
+// importUserData can set that string from a sync-folder file. A value outside
+// the union therefore matches no rows instead of being spliced into the SQL.
+function scopeFilter(scope: 'all' | 'sep' | 'owl'): { where: string; params: string[] } {
+  return scope === 'all'
+    ? { where: '', params: [] }
+    : { where: 'WHERE source = ?', params: [scope] };
+}
+
 export async function getEntryCounts(scope: 'all' | 'sep' | 'owl' = 'all'): Promise<{ total: number; cached: number }> {
   const db = await getDb();
-  const where = scope === 'all' ? '' : `WHERE source = '${scope}'`;
+  const { where, params } = scopeFilter(scope);
   const row = await db.getFirstAsync<{ total: number; cached: number }>(
-    `SELECT COUNT(*) AS total, COUNT(cached_at) AS cached FROM entries ${where}`
+    `SELECT COUNT(*) AS total, COUNT(cached_at) AS cached FROM entries ${where}`,
+    params
   );
   return { total: row?.total ?? 0, cached: row?.cached ?? 0 };
 }
@@ -321,33 +243,39 @@ export async function cacheArticle(
   const excerpt = makeExcerpt(data.preamble_html || data.content_html || '', 320);
   const now = Date.now();
 
-  // Preserve the old version record before overwriting
-  const prev = await db.getFirstAsync<{ content_hash: string | null; cached_at: number | null }>(
-    'SELECT content_hash, cached_at FROM entries WHERE slug = ?', [slug]
-  );
-  if (prev?.content_hash && prev?.cached_at) {
+  // One transaction: the old-version record, the row update and the new-version
+  // record must land together. Before, a failure between them could leave
+  // article_versions out of step with entries (e.g. the old article overwritten
+  // but its hash never recorded).
+  await db.withTransactionAsync(async () => {
+    // Preserve the old version record before overwriting
+    const prev = await db.getFirstAsync<{ content_hash: string | null; cached_at: number | null }>(
+      'SELECT content_hash, cached_at FROM entries WHERE slug = ?', [slug]
+    );
+    if (prev?.content_hash && prev?.cached_at) {
+      await db.runAsync(
+        'INSERT OR IGNORE INTO article_versions (slug, content_hash, cached_at) VALUES (?, ?, ?)',
+        [slug, prev.content_hash, prev.cached_at]
+      );
+    }
+
+    await db.runAsync(
+      `UPDATE entries SET
+         author = ?, pub_date = ?, content_hash = ?,
+         toc_html = ?, preamble_html = ?,
+         content_html = ?, notes_html = ?, content_ast = ?, has_math = ?, word_count = ?, excerpt = ?, cached_at = ?
+       WHERE slug = ?`,
+      [data.author ?? null, data.pub_date ?? null, hash,
+       data.toc_html ?? null, data.preamble_html ?? null,
+       data.content_html ?? null, data.notes_html ?? null, data.content_ast ?? null, data.has_math ? 1 : 0, wordCount, excerpt, now, slug]
+    );
+
+    // Record the new version
     await db.runAsync(
       'INSERT OR IGNORE INTO article_versions (slug, content_hash, cached_at) VALUES (?, ?, ?)',
-      [slug, prev.content_hash, prev.cached_at]
+      [slug, hash, now]
     );
-  }
-
-  await db.runAsync(
-    `UPDATE entries SET
-       author = ?, pub_date = ?, content_hash = ?,
-       toc_html = ?, preamble_html = ?,
-       content_html = ?, notes_html = ?, content_ast = ?, has_math = ?, word_count = ?, excerpt = ?, cached_at = ?
-     WHERE slug = ?`,
-    [data.author ?? null, data.pub_date ?? null, hash,
-     data.toc_html ?? null, data.preamble_html ?? null,
-     data.content_html ?? null, data.notes_html ?? null, data.content_ast ?? null, data.has_math ? 1 : 0, wordCount, excerpt, now, slug]
-  );
-
-  // Record the new version
-  await db.runAsync(
-    'INSERT OR IGNORE INTO article_versions (slug, content_hash, cached_at) VALUES (?, ?, ?)',
-    [slug, hash, now]
-  );
+  });
 }
 
 // Persist footnote-page HTML for an already-cached article (lazy backfill for
@@ -458,7 +386,7 @@ export async function recordRead(
       : String(now);
 
   await db.runAsync(
-    `INSERT INTO reads (slug, title, visited_at, from_slug, session_id)
+    `INSERT OR IGNORE INTO reads (slug, title, visited_at, from_slug, session_id)
      VALUES (?, ?, ?, ?, ?)`,
     [slug, title, now, fromSlug ?? null, sessionId]
   );
@@ -504,10 +432,24 @@ export async function getRecentSlugs(limit = 20): Promise<EntrySummary[]> {
 export async function getSessions(limit = 30): Promise<Session[]> {
   const db = await getDb();
 
+  // Bound the read in SQL: pick the newest `limit` sessions (by start time, with
+  // the row id breaking ties the same way the old full-table scan did), then
+  // load only their rows. History only ever grows, so loading every read just
+  // to slice the result in JS got slower with every article opened.
+  const bounded = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 0;
+  if (bounded === 0) return [];
+
   const rows = await db.getAllAsync<ReadRow>(
     `SELECT id, slug, title, visited_at, from_slug, session_id
      FROM reads
-     ORDER BY visited_at ASC`
+     WHERE session_id IN (
+       SELECT session_id FROM reads
+       GROUP BY session_id
+       ORDER BY MIN(visited_at) DESC, MIN(id) DESC
+       LIMIT ?
+     )
+     ORDER BY visited_at ASC, id ASC`,
+    [bounded]
   );
 
   // Group by session_id
@@ -528,8 +470,8 @@ export async function getSessions(limit = 30): Promise<Session[]> {
     });
   }
 
-  // Newest first, limited
-  return sessions.reverse().slice(0, limit);
+  // Newest first (the query already limited which sessions are present)
+  return sessions.reverse();
 }
 
 function buildTree(reads: ReadRow[]): ReadNode[] {
@@ -685,9 +627,10 @@ export async function getSlugsByCacheStatus(scope: 'all' | 'sep' | 'owl' = 'all'
   cached: { slug: string; title: string }[];
 }> {
   const db = await getDb();
-  const where = scope === 'all' ? '' : `WHERE source = '${scope}'`;
+  const { where, params } = scopeFilter(scope);
   const rows = await db.getAllAsync<{ slug: string; title: string; is_cached: number }>(
-    `SELECT slug, title, (cached_at IS NOT NULL) AS is_cached FROM entries ${where}`
+    `SELECT slug, title, (cached_at IS NOT NULL) AS is_cached FROM entries ${where}`,
+    params
   );
   const uncached: { slug: string; title: string }[] = [];
   const cached: { slug: string; title: string }[] = [];
@@ -844,23 +787,48 @@ export async function getBookmarksFull(): Promise<BookmarkRow[]> {
 
 // ── Zotero ───────────────────────────────────────────────────────────────────
 
+// The API key is a secret: it lives in secure storage (secureSecrets.ts), not in
+// the plain `meta` table, so it never reaches DB backups or the sync export.
+// Where secure storage is unavailable (or a write to it fails) it falls back to
+// a `meta` row — still never exported, because exports use SYNCED_PREF_KEYS.
+// A `meta` row, when present, is the newest value and wins over secure storage;
+// it is removed the next time a save reaches secure storage. Neither Zotero
+// value is synced between devices.
+const ZOTERO_API_KEY = 'zotero_api_key';
+const ZOTERO_USER_ID = 'zotero_user_id';
+
+async function readZoteroApiKey(db: SQLite.SQLiteDatabase): Promise<string> {
+  const fallback = await db.getFirstAsync<{ value: string }>(
+    'SELECT value FROM meta WHERE key = ?', [ZOTERO_API_KEY]
+  );
+  if (fallback) return fallback.value;
+  if (!(await secretsAvailable())) return '';
+  return (await getSecret(ZOTERO_API_KEY)) ?? '';
+}
+
 export async function getZoteroPrefs(): Promise<{ apiKey: string; userId: string }> {
   const db = await getDb();
-  const rows = await db.getAllAsync<{ key: string; value: string }>(
-    "SELECT key, value FROM meta WHERE key IN ('zotero_api_key', 'zotero_user_id')"
+  const row = await db.getFirstAsync<{ value: string }>(
+    'SELECT value FROM meta WHERE key = ?', [ZOTERO_USER_ID]
   );
-  const m = Object.fromEntries(rows.map(r => [r.key, r.value]));
-  return { apiKey: m['zotero_api_key'] ?? '', userId: m['zotero_user_id'] ?? '' };
+  return { apiKey: await readZoteroApiKey(db), userId: row?.value ?? '' };
 }
 
 export async function saveZoteroPrefs(apiKey: string, userId: string): Promise<void> {
   const db = await getDb();
+  // True once the key is safely out of `meta`.
+  const inSecureStore = (await secretsAvailable())
+    && (apiKey ? await setSecret(ZOTERO_API_KEY, apiKey) : await deleteSecret(ZOTERO_API_KEY));
   await db.withTransactionAsync(async () => {
-    await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('zotero_api_key', ?)", [apiKey]);
     await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('zotero_user_id', ?)", [userId]);
+    if (inSecureStore) {
+      await db.runAsync('DELETE FROM meta WHERE key = ?', [ZOTERO_API_KEY]);
+    } else {
+      await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('zotero_api_key', ?)", [apiKey]);
+    }
   });
-  cacheMeta('zotero_api_key', apiKey);
-  cacheMeta('zotero_user_id', userId);
+  cacheMeta(ZOTERO_USER_ID, userId);
+  metaCache.delete(ZOTERO_API_KEY); // never keep the secret in the in-memory meta cache
 }
 
 // ── Annotations ──────────────────────────────────────────────────────────────
@@ -875,13 +843,15 @@ export async function saveAnnotation(
 ): Promise<Annotation> {
   const db = await getDb();
   const now = Date.now();
+  const uid = newUid();
   const result = await db.runAsync(
-    `INSERT INTO annotations (slug, selected_text, context, note, color, content_hash, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [slug, selectedText, context ?? null, note ?? null, color, currentHash ?? null, now, now]
+    `INSERT INTO annotations (uid, slug, selected_text, context, note, color, content_hash, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [uid, slug, selectedText, context ?? null, note ?? null, color, currentHash ?? null, now, now]
   );
   return {
     id: result.lastInsertRowId,
+    uid,
     slug, selected_text: selectedText, context: context ?? null,
     note: note ?? null, color, content_hash: currentHash ?? null,
     created_at: now, updated_at: now,
@@ -935,6 +905,16 @@ export interface UserDataExport {
   prefs: Record<string, string>;
 }
 
+// The ONLY `meta` keys that travel in the user-data export (and that an import
+// will write back). This is an allowlist on purpose: `meta` also holds secrets,
+// device-local paths, caches and migration markers, and a new key must never
+// leak into a synced file just because nobody remembered to exclude it. Add a
+// key here only if it is a harmless, user-chosen preference.
+export const SYNCED_PREF_KEYS: readonly string[] = [
+  'pref_home', 'pref_download_all', 'pref_library_scope', 'pref_seed_url',
+  'custom_css', 'font_size', 'auto_sync', 'link_preview', 'graph_visited_only',
+];
+
 export async function exportUserData(): Promise<UserDataExport> {
   const db = await getDb();
   const [reads, bookmarks, annotations, metaRows] = await Promise.all([
@@ -942,7 +922,8 @@ export async function exportUserData(): Promise<UserDataExport> {
     db.getAllAsync<BookmarkRow>('SELECT * FROM bookmarks ORDER BY saved_at ASC'),
     db.getAllAsync<Annotation>('SELECT * FROM annotations ORDER BY created_at ASC'),
     db.getAllAsync<{ key: string; value: string }>(
-      "SELECT key, value FROM meta WHERE key NOT IN ('onboarding_done')"
+      `SELECT key, value FROM meta WHERE key IN (${SYNCED_PREF_KEYS.map(() => '?').join(',')})`,
+      [...SYNCED_PREF_KEYS]
     ),
   ]);
   return {
@@ -958,13 +939,9 @@ export async function exportUserData(): Promise<UserDataExport> {
 export async function importUserData(data: UserDataExport): Promise<void> {
   const db = await getDb();
   await db.withTransactionAsync(async () => {
-    // Reads: insert-or-ignore by (slug, visited_at) to avoid dupes
-    for (const r of data.reads) {
-      await db.runAsync(
-        `INSERT OR IGNORE INTO reads (slug, title, visited_at, from_slug, session_id)
-         VALUES (?, ?, ?, ?, ?)`,
-        [r.slug, r.title, r.visited_at, r.from_slug ?? null, r.session_id]
-      );
+    // Reads: identity is (slug, visited_at, session_id); see readsMerge.ts.
+    for (const r of data.reads ?? []) {
+      await mergeRead(db, r);
     }
     // Bookmarks: upsert by slug, keep newest saved_at
     for (const b of data.bookmarks) {
@@ -978,21 +955,15 @@ export async function importUserData(data: UserDataExport): Promise<void> {
         [b.slug, b.title, b.saved_at, b.notes ?? null]
       );
     }
-    // Annotations: upsert by id — incoming id wins on conflict
-    for (const a of data.annotations) {
-      await db.runAsync(
-        `INSERT INTO annotations (id, slug, selected_text, context, note, color, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           note = COALESCE(excluded.note, note),
-           color = excluded.color,
-           updated_at = MAX(updated_at, excluded.updated_at)`,
-        [a.id, a.slug, a.selected_text, a.context ?? null,
-         a.note ?? null, a.color, a.created_at, a.updated_at]
-      );
+    // Annotations: matched across devices by uid (never by the local integer id),
+    // last writer wins per record — see annotationMerge.ts.
+    for (const a of data.annotations ?? []) {
+      await mergeAnnotation(db, a);
     }
-    // Prefs: merge, remote wins
-    for (const [key, value] of Object.entries(data.prefs ?? {})) {
+    // Prefs: merge, remote wins — allowlisted keys only, so a file can never
+    // write credentials, device paths or caches into this device's meta.
+    for (const [key, value] of Object.entries(data.prefs)) {
+      if (!SYNCED_PREF_KEYS.includes(key) || typeof value !== 'string') continue;
       await db.runAsync(
         'INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [key, value]
       );

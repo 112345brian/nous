@@ -1,11 +1,13 @@
 // On-device TeX → SVG renderer that runs MathJax directly in the JS runtime.
 //
-// STATUS: NOT IN USE. Nothing in the app imports this file; its only consumer is
-// its own test. The live math path is mathRender.ts → the hidden MathJax WebView
-// (components/MathRenderWebView.tsx), because MathJax failed at module init under
-// Hermes (see git history: cf1db37 → 95d69c9 → d63e6c5). The file is kept as the
-// starting point for a possible "MathJax in Hermes" spike (docs/library-research.md,
-// section 2); delete it if that spike is dropped.
+// STATUS: dev-only. The live math path is mathRender.ts → the hidden MathJax
+// WebView (components/MathRenderWebView.tsx). This file is reached only through
+// services/mathRenderHermes.ts, which is switched on by the build-time flag
+// EXPO_PUBLIC_MATH_HERMES=1 (off by default). The earlier failure under Hermes
+// (git history: cf1db37 → 95d69c9 → d63e6c5) was MathJax's version module doing a
+// Node-only `eval('require')`; defining a global PACKAGE_VERSION first avoids it.
+// Numbers and the recommendation are in docs/mathjax-hermes-spike.md. Delete this
+// file and mathRenderHermes.ts if the spike is dropped.
 //
 // LICENSING: we ship the math *engine* (mathjax-full, Apache-2.0) and render
 // each equation on the user's device from TeX that arrived inside the
@@ -34,6 +36,14 @@ function ensureDoc(): boolean {
   if (_doc) return true;
   if (_initError) return false;
   try {
+    // Hermes fix (see docs/mathjax-hermes-spike.md): mathjax-full/js/components/version.js
+    // does `eval('require')` / `eval('__dirname')` — Node-only — unless a global
+    // PACKAGE_VERSION exists. Without it the engine throws "Property 'require'
+    // doesn't exist" under Hermes. Harmless in Node.
+    const g = globalThis as any;
+    if (typeof g.PACKAGE_VERSION === 'undefined') {
+      g.PACKAGE_VERSION = require('mathjax-full/package.json').version;
+    }
     // Required, not imported at top level, so the engine only loads if an
     // article actually contains math (~24% of the corpus).
     const { mathjax } = require('mathjax-full/js/mathjax.js');

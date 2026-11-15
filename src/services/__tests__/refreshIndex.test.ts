@@ -1,6 +1,6 @@
 // Behaviour of catalog.refreshIndexIfStale as seen by its callers (App.tsx, syncCachedArticles).
 // Written BEFORE the logic moved into src/core and kept unchanged afterwards. db and fetch are fakes.
-import { refreshIndexIfStale } from '../catalog';
+import { refreshIndexIfStale } from '../../composition';   // wired in the composition root
 import * as db from '../db';
 import seed from '../../assets/entry-seed.json';
 

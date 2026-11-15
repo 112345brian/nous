@@ -29,6 +29,7 @@ jest.mock('../db', () => ({
   getEntryHtml: jest.fn(async (slug: string) => mockEntries[slug]?.content_html ?? null),
   putMathBatch: jest.fn(async () => {}),
   getMathSvgMap: jest.fn(async () => ({})),
+  getMathByHashes: jest.fn(async () => []),
   setEntryNotes: jest.fn(),
 }));
 
@@ -38,12 +39,8 @@ jest.mock('../mathRender', () => ({
 }));
 
 import * as db from '../db';
-import {
-  fetchAndCacheArticle,
-  onMathReady,
-  completeArticleMath,
-  resumePendingMath,
-} from '../catalog';
+import { _resetMathCacheState } from '../mathCache';
+import { fetchAndCacheArticle, onMathReady, completeArticleMath, resumePendingMath } from '../../composition';   // wired in the composition root
 
 const PAGE = `<html><head><title>Logic (Stanford Encyclopedia of Philosophy)</title></head>
 <body><div id="aueditable"><h1>Logic</h1><p>Let \\(x\\) be a set and \\[y = 2\\] hold.</p></div></body></html>`;
@@ -60,6 +57,7 @@ function deferred<T>() {
 const flush = () => new Promise<void>(r => setTimeout(r, 0));
 
 beforeEach(() => {
+  _resetMathCacheState();
   jest.clearAllMocks();
   for (const k of Object.keys(mockMeta)) delete mockMeta[k];
   for (const k of Object.keys(mockEntries)) delete mockEntries[k];

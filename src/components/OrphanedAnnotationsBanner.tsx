@@ -6,6 +6,7 @@ import {
 import type { Annotation } from '../types';
 import { reanchorAll } from '../utils/reanchor';
 import { updateAnnotationAnchor, deleteAnnotations } from '../services/db';
+import { colors, themedStyles } from '../theme/tokens';
 
 interface Props {
   annotations: Annotation[];          // orphaned annotations
@@ -78,7 +79,7 @@ export default function OrphanedAnnotationsBanner({
 
   return (
     <>
-      <TouchableOpacity style={styles.banner} onPress={() => setShowSheet(true)} activeOpacity={0.8}>
+      <TouchableOpacity accessibilityRole="button" style={styles.banner} onPress={() => setShowSheet(true)} activeOpacity={0.8}>
         <Text style={styles.bannerIcon}>⚠</Text>
         <Text style={styles.bannerText}>
           {count} highlight{count > 1 ? 's' : ''} from a previous version
@@ -92,7 +93,7 @@ export default function OrphanedAnnotationsBanner({
         animationType="slide"
         onRequestClose={() => setShowSheet(false)}
       >
-        <Pressable style={styles.backdrop} onPress={() => setShowSheet(false)} />
+        <Pressable accessibilityRole="button" style={styles.backdrop} onPress={() => setShowSheet(false)} />
         <View style={styles.sheet}>
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle}>Previous version highlights</Text>
@@ -111,7 +112,7 @@ export default function OrphanedAnnotationsBanner({
                   <Text style={styles.annText} numberOfLines={3}>"{item.selected_text}"</Text>
                   {item.note && <Text style={styles.annNote}>{item.note}</Text>}
                 </View>
-                <TouchableOpacity
+                <TouchableOpacity accessibilityRole="button"
                   style={styles.deleteOne}
                   onPress={() => handleDeleteOne(item.id)}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -126,15 +127,15 @@ export default function OrphanedAnnotationsBanner({
           />
 
           <View style={styles.sheetActions}>
-            <TouchableOpacity style={styles.dismissBtn} onPress={() => { setShowSheet(false); onDismiss(); }}>
+            <TouchableOpacity accessibilityRole="button" style={styles.dismissBtn} onPress={() => { setShowSheet(false); onDismiss(); }}>
               <Text style={styles.dismissBtnText}>Keep for now</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.reanchorBtn} onPress={handleReanchorAll} disabled={reanchoring}>
+            <TouchableOpacity accessibilityRole="button" style={styles.reanchorBtn} onPress={handleReanchorAll} disabled={reanchoring}>
               {reanchoring
-                ? <ActivityIndicator color="#7ba4ff" size="small" />
+                ? <ActivityIndicator color={colors.accentSoft} size="small" />
                 : <Text style={styles.reanchorBtnText}>Re-anchor ✦</Text>}
             </TouchableOpacity>
-            <TouchableOpacity style={styles.deleteAllBtn} onPress={handleDeleteAll}>
+            <TouchableOpacity accessibilityRole="button" style={styles.deleteAllBtn} onPress={handleDeleteAll}>
               <Text style={styles.deleteAllBtnText}>Delete all</Text>
             </TouchableOpacity>
           </View>
@@ -144,31 +145,31 @@ export default function OrphanedAnnotationsBanner({
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   banner: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#2a1f00',
+    backgroundColor: colors.warnWash,
     borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#FFE56633',
     paddingHorizontal: 14, paddingVertical: 9, gap: 8,
   },
-  bannerIcon: { fontSize: 13, color: '#FFE566' },
-  bannerText: { flex: 1, color: '#c8a800', fontSize: 13 },
-  bannerReview: { color: '#FFE566', fontSize: 13, fontWeight: '600' },
+  bannerIcon: { fontSize: 13, color: colors.warnBright },
+  bannerText: { flex: 1, color: colors.warnText, fontSize: 13 },
+  bannerReview: { color: colors.warnBright, fontSize: 13, fontWeight: '600' },
 
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
   sheet: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: '#1c1c1e',
+    backgroundColor: colors.surface,
     borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#3a3a3c',
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
     maxHeight: '72%',
   },
   sheetHeader: {
     paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#2a2a2a',
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
   },
-  sheetTitle: { color: '#e8e8e8', fontSize: 16, fontWeight: '600', marginBottom: 6 },
-  sheetSub: { color: '#666', fontSize: 13, lineHeight: 18 },
+  sheetTitle: { color: colors.text, fontSize: 16, fontWeight: '600', marginBottom: 6 },
+  sheetSub: { color: colors.textMuted, fontSize: 13, lineHeight: 18 },
 
   list: { maxHeight: 280 },
   annRow: {
@@ -177,29 +178,29 @@ const styles = StyleSheet.create({
     borderLeftWidth: 3, marginLeft: 16, marginTop: 10, gap: 10,
   },
   annContent: { flex: 1 },
-  annText: { color: '#888', fontSize: 13, lineHeight: 18, fontStyle: 'italic' },
-  annNote: { color: '#555', fontSize: 12, marginTop: 4 },
+  annText: { color: colors.textMuted, fontSize: 13, lineHeight: 18, fontStyle: 'italic' },
+  annNote: { color: colors.textMuted, fontSize: 12, marginTop: 4 },
   deleteOne: { paddingLeft: 8 },
-  deleteOneText: { color: '#555', fontSize: 15 },
-  allResolved: { color: '#444', fontSize: 14, textAlign: 'center', padding: 32 },
+  deleteOneText: { color: colors.textMuted, fontSize: 15 },
+  allResolved: { color: colors.textMuted, fontSize: 14, textAlign: 'center', padding: 32 },
 
   sheetActions: {
     flexDirection: 'row', gap: 8, padding: 16, paddingBottom: 32,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#2a2a2a',
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
   },
   dismissBtn: {
     paddingVertical: 12, paddingHorizontal: 12, borderRadius: 10,
-    backgroundColor: '#2c2c2e', alignItems: 'center',
+    backgroundColor: colors.fillMuted, alignItems: 'center',
   },
-  dismissBtnText: { color: '#888', fontSize: 14 },
+  dismissBtnText: { color: colors.textMuted, fontSize: 14 },
   reanchorBtn: {
     flex: 1, paddingVertical: 12, borderRadius: 10,
-    backgroundColor: '#1a2a40', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.accentWash, alignItems: 'center', justifyContent: 'center',
   },
-  reanchorBtnText: { color: '#7ba4ff', fontSize: 14, fontWeight: '600' },
+  reanchorBtnText: { color: colors.accentSoft, fontSize: 14, fontWeight: '600' },
   deleteAllBtn: {
     paddingVertical: 12, paddingHorizontal: 12, borderRadius: 10,
-    backgroundColor: '#3a0000', alignItems: 'center',
+    backgroundColor: colors.dangerWash, alignItems: 'center',
   },
-  deleteAllBtnText: { color: '#FF6B6B', fontSize: 14 },
-});
+  deleteAllBtnText: { color: colors.danger, fontSize: 14 },
+}));

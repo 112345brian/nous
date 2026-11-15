@@ -28,7 +28,7 @@ function world(o: { entries?: Record<string, string>; pending?: string[]; render
       getMeta: async k => { await lag(); return meta.get(k) ?? null; },
       setMeta: async (k, v) => { await lag(); log.push(`set:${k}`); meta.set(k, v); },
     },
-    sleep: async ms => { log.push(`sleep:${ms}`); },
+    pause: async priority => { log.push(`pause:${priority}`); },
   };
   const pending = () => JSON.parse(meta.get(MATH_PENDING_KEY) ?? '[]') as string[];
   return { deps, log, entries, asts, meta, pending };
@@ -124,6 +124,26 @@ describe('createMathCompletion with fakes', () => {
     expect(seen).toEqual(['a']);
   });
 
+  test('the priority reaches the renderer: current by default, whatever the caller asks otherwise', async () => {
+    const seen: string[] = [];
+    const w = world({ entries: { a: TEX, b: TEX } });
+    const inner = w.deps.substitute;
+    w.deps.substitute = async (html, priority) => { seen.push(priority); return inner(html, priority); };
+    const mc = createMathCompletion(w.deps);
+    await mc.completeArticleMath('a');
+    await mc.completeArticleMath('b', undefined, 'background');
+    expect(seen).toEqual(['current', 'background']);
+  });
+
+  test('a stall watch is started per article and always stopped, even when completion fails', async () => {
+    const events: string[] = [];
+    const w = world({ entries: { a: TEX }, substituteFails: true });
+    w.deps.watchStall = label => { events.push(`start:${label}`); return () => { events.push(`stop:${label}`); }; };
+    const mc = createMathCompletion(w.deps);
+    expect(await mc.completeArticleMath('a')).toBe(false);
+    expect(events).toEqual(['start:math:a', 'stop:math:a']);
+  });
+
   test('completeLater records the debt before it renders, and does not wait', async () => {
     const w = world({ entries: { a: TEX } });
     const mc = createMathCompletion(w.deps);
@@ -136,11 +156,11 @@ describe('createMathCompletion with fakes', () => {
     expect(w.pending()).toEqual([]);     // and cleared again once rendering finished
   });
 
-  test('resumePendingMath: one at a time, in order, yielding through the injected sleep, surviving failures', async () => {
+  test('resumePendingMath: one at a time, in order, pausing at background priority before each, surviving failures', async () => {
     const w = world({ entries: { a: TEX, b: TEX }, pending: ['a', 'missing', 'b'] });
     await createMathCompletion(w.deps).resumePendingMath();
-    expect(w.log.filter(l => l.startsWith('sleep:') || l.startsWith('write:'))).toEqual(
-      ['sleep:32', 'write:a', 'sleep:32', 'sleep:32', 'write:b']);
+    expect(w.log.filter(l => l.startsWith('pause:') || l.startsWith('write:'))).toEqual(
+      ['pause:background', 'write:a', 'pause:background', 'pause:background', 'write:b']);
     expect(w.pending()).toEqual(['missing']);
   });
 

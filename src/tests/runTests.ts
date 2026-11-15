@@ -7,7 +7,7 @@ import {
   recordRead, getRecentSlugs, getMeta, setMeta,
   contentHash,
 } from '../services/db';
-import { fetchAndCacheArticle } from '../services/catalog';
+import { fetchAndCacheArticle } from '../composition';
 import { buildArticleHtml } from '../utils/articleTemplate';
 
 export interface TestResult {

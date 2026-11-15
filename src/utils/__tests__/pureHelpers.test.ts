@@ -1,7 +1,7 @@
 // Characterization tests: written against the helpers while they still lived in
 // services/catalog.ts and services/db.ts, then re-pointed at their new homes.
 // The snapshots hold values produced by the original code.
-import { mathHash } from '../mathHash';
+import { hash64 as mathHash } from '../mathKey';   // was utils/mathHash.ts before the math-throttle merge
 import { extractById, extractMetaContent, extractTitle, extractAuthor, decodeEntities } from '../sepPage';
 import { formatCitation } from '../citation';
 import { contentHash } from '../contentHash';

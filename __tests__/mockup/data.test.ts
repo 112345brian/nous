@@ -4,10 +4,11 @@ import { makeExcerpt } from '../../src/utils/excerpt';
 
 describe('DATA — backing behaviour', () => {
   const db = () => SRC.db();
+  // The schema lives in the versioned migration list, not in db.ts.
+  const schema = () => SRC.coreSchema();
 
-  test('DATA-01 entries.read_progress column + migration', () => {
-    expect(db()).toMatch(/read_progress\s+REAL/);
-    expect(db()).toMatch(/ALTER TABLE entries ADD COLUMN read_progress/);
+  test('DATA-01 entries.read_progress column', () => {
+    expect(schema()).toMatch(/read_progress\s+REAL/);
   });
 
   test('DATA-01 setReadProgress ratchets upward (MAX) and clamps', () => {
@@ -27,7 +28,7 @@ describe('DATA — backing behaviour', () => {
   });
 
   test('DATA-04 entries.excerpt column populated at cache time', () => {
-    expect(db()).toMatch(/excerpt\s+TEXT/);
+    expect(schema()).toMatch(/excerpt\s+TEXT/);
     expect(db()).toMatch(/makeExcerpt/);
   });
 

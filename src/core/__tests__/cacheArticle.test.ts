@@ -87,6 +87,15 @@ describe('fetchAndCacheArticle with fakes', () => {
       expect(w.cached[0].data.content_html).toContain('<math-i');
       expect(w.deferred).toEqual([]);
     });
+    test('awaitMath renders with no priority (the caller owns the schedule); the deferred path does not render here', async () => {
+      const w = world({ page: TEX });
+      const seen: unknown[] = [];
+      const inner = w.deps.math.substitute;
+      w.deps.math.substitute = async (html, priority) => { seen.push(priority); return inner(html, priority); };
+      await fetchAndCacheArticle(w.deps, 'a', { awaitMath: true });
+      await fetchAndCacheArticle(w.deps, 'b');
+      expect(seen).toEqual([null]);
+    });
     test('skipMath: raw TeX, no rendering, nothing deferred', async () => {
       const w = world({ page: TEX });
       await fetchAndCacheArticle(w.deps, 'a', { skipMath: true });

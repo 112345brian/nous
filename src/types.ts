@@ -50,6 +50,8 @@ export interface Session {
 
 export interface Annotation {
   id: number;
+  /** Cross-device identity (sync); absent in rows from before the uid migration or v1 sync files. */
+  uid?: string | null;
   slug: string;
   selected_text: string;
   context: string | null;

@@ -4,7 +4,7 @@
 //
 //   RC1  inner ring and core never import the composition root         (see innerRing.test.ts)
 //   RC2  adapters (src/services) never import the composition root
-//   RC3  only composition.ts wires core use cases (recorded exception: services/catalog.ts)
+//   RC3  only composition.ts wires core use cases (no exceptions today)
 //   RC4  screens, components and App.tsx get the converted use cases from the root
 //   RC5  ratchet: the files that still import the SQLite adapter directly can only shrink
 import ts from 'typescript';
@@ -64,13 +64,13 @@ const CONVERTED = [
   'exportToSyncFolder', 'importFromSyncFolder', 'exportToZotero',
   'refreshIndexIfStale', 'fetchAndCacheArticle', 'downloadAll', 'syncCachedArticles',
   'onMathReady', 'completeArticleMath', 'resumePendingMath',
+  'backfillMathInline', 'backfillAst', 'ensureNotesCached', 'startPrefetch',
 ];
 
 // RC3 exceptions: a file other than composition.ts that still wires a core use case.
-const WIRING_EXCEPTIONS: Array<{ file: string; reason: string }> = [
-  { file: 'src/services/catalog.ts',
-    reason: 'backfillMathInline still calls resumePendingMath from the math-completion instance created here, so moving the wiring to the root would make catalog and composition import each other; goes away when that backfill is converted or removed' },
-];
+// None today: services/catalog.ts was the last one and is now adapters only. A new entry needs a
+// reason, and the check below fails if the entry stops being true.
+const WIRING_EXCEPTIONS: Array<{ file: string; reason: string }> = [];
 
 // RC5: files outside the root that import the SQLite adapter (services/db) directly. Shrink-only.
 const DB_DIRECT_ALLOWLIST = [
@@ -83,6 +83,9 @@ const DB_DIRECT_ALLOWLIST = [
   'src/screens/HomeScreen.tsx',
   'src/screens/ReadingListScreen.tsx',
   'src/screens/SettingsScreen.tsx',
+  // New with the light-mode work: reads and writes the 'appearance' preference through getMeta/setMeta.
+  // Route it through the root (a KeyValueStore passed to the provider) and remove it from this list.
+  'src/theme/ThemeProvider.tsx',
 ];
 
 describe('the composition root exists', () => {
@@ -123,7 +126,7 @@ describe('RC4: UI gets the converted use cases from the root', () => {
     const bad: string[] = [];
     for (const f of UI) {
       for (const i of importsFor(f)) {
-        if (i.from === 'src/services/catalog' || i.from === 'src/services/dataSync') {
+        if (i.from === 'src/services/catalog' || i.from === 'src/services/dataSync' || i.from === 'src/services/prefetch') {
           for (const n of i.names) if (CONVERTED.includes(n)) bad.push(`${f} imports ${n} from ${i.from}`);
         }
       }
