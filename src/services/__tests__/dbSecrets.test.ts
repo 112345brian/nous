@@ -222,7 +222,7 @@ describe('exportUserData / importUserData', () => {
     expect(Object.keys(prefs).sort()).toEqual([...db.SYNCED_PREF_KEYS].sort());
   });
 
-  it('import ignores credentials and other non-allowlisted keys from an old full-meta export', async () => {
+  it('import writes only allowlisted pref keys, ignoring credentials, paths and caches', async () => {
     const db = freshDb();
     await db.importUserData({
       version: 1, exported_at: 0, reads: [], bookmarks: [], annotations: [],
@@ -255,11 +255,14 @@ describe('exportUserData / importUserData', () => {
     expect(await db.getMeta('font_size')).toBe('21');
   });
 
-  it('import accepts an export with no prefs field', async () => {
+  it('import rejects a malformed export with no prefs field, writing nothing', async () => {
     const db = freshDb();
     await expect(
-      db.importUserData({ version: 1, exported_at: 0, reads: [], bookmarks: [], annotations: [] } as any),
-    ).resolves.toBeUndefined();
+      db.importUserData({
+        version: 1, exported_at: 0, reads: [],
+        bookmarks: [{ slug: 'a', title: 'A', saved_at: 1, notes: null }], annotations: [],
+      } as any),
+    ).rejects.toThrow();
   });
 });
 

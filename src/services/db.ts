@@ -966,10 +966,9 @@ export async function importUserData(data: UserDataExport): Promise<void> {
          a.note ?? null, a.color, a.created_at, a.updated_at]
       );
     }
-    // Prefs: merge, remote wins — allowlisted keys only. Older exports contain the
-    // whole `meta` table (Zotero credentials, sync folder, caches, migration
-    // markers); those are ignored rather than written back.
-    for (const [key, value] of Object.entries(data.prefs ?? {})) {
+    // Prefs: merge, remote wins — allowlisted keys only, so a file can never
+    // write credentials, device paths or caches into this device's meta.
+    for (const [key, value] of Object.entries(data.prefs)) {
       if (!SYNCED_PREF_KEYS.includes(key) || typeof value !== 'string') continue;
       await db.runAsync(
         'INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [key, value]
