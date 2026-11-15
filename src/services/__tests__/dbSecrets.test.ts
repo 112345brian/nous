@@ -104,37 +104,6 @@ describe('Zotero API key in secure storage', () => {
     expect(await db.getMeta('zotero_api_key')).toBeNull();
   });
 
-  it('a stray meta row is migrated to secure storage on first read, then deleted', async () => {
-    const db = freshDb();
-    mockMeta.set('zotero_api_key', 'OLDKEY');
-    mockMeta.set('zotero_user_id', '7');
-    expect(await db.getZoteroPrefs()).toEqual({ apiKey: 'OLDKEY', userId: '7' });
-    expect(secure().__dump()).toEqual({ zotero_api_key: 'OLDKEY' });
-    expect(mockMeta.has('zotero_api_key')).toBe(false);
-    // idempotent: second read, nothing left to migrate
-    expect(await db.getZoteroPrefs()).toEqual({ apiKey: 'OLDKEY', userId: '7' });
-  });
-
-  it('migration keeps the meta row (and still returns the key) if the secure write fails', async () => {
-    const db = freshDb();
-    mockMeta.set('zotero_api_key', 'OLDKEY');
-    secure().__setFailSet(true);
-    expect((await db.getZoteroPrefs()).apiKey).toBe('OLDKEY');
-    expect(mockMeta.get('zotero_api_key')).toBe('OLDKEY'); // not lost
-    secure().__setFailSet(false);
-    await db.getZoteroPrefs(); // retried on the next read
-    expect(secure().__dump()).toEqual({ zotero_api_key: 'OLDKEY' });
-    expect(mockMeta.has('zotero_api_key')).toBe(false);
-  });
-
-  it('migration does not drop the meta row if the secure copy cannot be read back', async () => {
-    const db = freshDb();
-    mockMeta.set('zotero_api_key', 'OLDKEY');
-    secure().__setFailGet(true);
-    expect((await db.getZoteroPrefs()).apiKey).toBe('OLDKEY');
-    expect(mockMeta.get('zotero_api_key')).toBe('OLDKEY');
-  });
-
   it('a newer meta row (written while secure storage was failing) wins over a stale secret', async () => {
     const db = freshDb();
     await db.saveZoteroPrefs('OLD', '1');
@@ -143,8 +112,11 @@ describe('Zotero API key in secure storage', () => {
     expect(mockMeta.get('zotero_api_key')).toBe('NEW');
     secure().__setFailSet(false);
     expect((await db.getZoteroPrefs()).apiKey).toBe('NEW');
-    expect(secure().__dump()).toEqual({ zotero_api_key: 'NEW' });
+    // the next save that reaches secure storage removes the fallback row
+    await db.saveZoteroPrefs('NEWER', '1');
+    expect(secure().__dump()).toEqual({ zotero_api_key: 'NEWER' });
     expect(mockMeta.has('zotero_api_key')).toBe(false);
+    expect((await db.getZoteroPrefs()).apiKey).toBe('NEWER');
   });
 
   it('falls back to meta when secure storage is unavailable (e.g. macOS), and never exports it', async () => {
@@ -172,15 +144,13 @@ describe('Zotero API key in secure storage', () => {
     }
   });
 
-  it('an empty key saved while unavailable then read once available clears the secret', async () => {
+  it('an empty key saved while unavailable still reads as empty once available', async () => {
     const db = freshDb();
     await db.saveZoteroPrefs('KEY123', '42');
     secure().__setAvailable(false);
     await db.saveZoteroPrefs('', '42'); // meta ''
     secure().__setAvailable(true);
     expect((await db.getZoteroPrefs()).apiKey).toBe('');
-    expect(secure().__dump()).toEqual({});
-    expect(mockMeta.has('zotero_api_key')).toBe(false);
   });
 });
 
@@ -194,15 +164,15 @@ describe('exportUserData / importUserData', () => {
     expect(out.version).toBe(1);
   });
 
-  it('exports only allowlisted prefs — never credentials, even from a legacy meta row', async () => {
+  it('exports only allowlisted prefs — never credentials, even from a fallback meta row', async () => {
     const db = freshDb();
     await db.saveZoteroPrefs('SECRETKEY', '42');
-    mockMeta.set('zotero_api_key', 'LEGACYKEY'); // pre-migration row still in meta
+    mockMeta.set('zotero_api_key', 'FALLBACKKEY'); // fallback row in meta
     mockMeta.set('onboarding_done', 'true');
     mockMeta.set('font_size', '19');
     const { prefs } = await db.exportUserData();
     expect(prefs).toEqual({ font_size: '19' });
-    expect(JSON.stringify(await db.exportUserData())).not.toMatch(/SECRETKEY|LEGACYKEY|zotero/);
+    expect(JSON.stringify(await db.exportUserData())).not.toMatch(/SECRETKEY|FALLBACKKEY|zotero/);
   });
 
   it('a brand-new meta key is NOT exported until someone adds it to SYNCED_PREF_KEYS', async () => {

@@ -777,29 +777,19 @@ export async function getBookmarksFull(): Promise<BookmarkRow[]> {
 // the plain `meta` table, so it never reaches DB backups or the sync export.
 // Where secure storage is unavailable (or a write to it fails) it falls back to
 // a `meta` row — still never exported, because exports use SYNCED_PREF_KEYS.
-// A `meta` row therefore means "newer than, or not yet moved to, secure storage":
-// the next read migrates it. Neither Zotero value is synced between devices.
+// A `meta` row, when present, is the newest value and wins over secure storage;
+// it is removed the next time a save reaches secure storage. Neither Zotero
+// value is synced between devices.
 const ZOTERO_API_KEY = 'zotero_api_key';
 const ZOTERO_USER_ID = 'zotero_user_id';
 
 async function readZoteroApiKey(db: SQLite.SQLiteDatabase): Promise<string> {
-  const legacy = await db.getFirstAsync<{ value: string }>(
+  const fallback = await db.getFirstAsync<{ value: string }>(
     'SELECT value FROM meta WHERE key = ?', [ZOTERO_API_KEY]
   );
-  if (!(await secretsAvailable())) return legacy?.value ?? '';
-  if (!legacy) return (await getSecret(ZOTERO_API_KEY)) ?? '';
-
-  // One-time migration out of `meta`. Only drop the plaintext row once the secure
-  // copy reads back identical; otherwise keep it and retry on the next read.
-  const value = legacy.value;
-  const moved = value === ''
-    ? await deleteSecret(ZOTERO_API_KEY)
-    : (await setSecret(ZOTERO_API_KEY, value)) && (await getSecret(ZOTERO_API_KEY)) === value;
-  if (moved) {
-    await db.runAsync('DELETE FROM meta WHERE key = ?', [ZOTERO_API_KEY]);
-    metaCache.delete(ZOTERO_API_KEY);
-  }
-  return value;
+  if (fallback) return fallback.value;
+  if (!(await secretsAvailable())) return '';
+  return (await getSecret(ZOTERO_API_KEY)) ?? '';
 }
 
 export async function getZoteroPrefs(): Promise<{ apiKey: string; userId: string }> {
