@@ -12,6 +12,7 @@
 
 import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system';
+import { HERMES_MATH_ENABLED, renderMathBatchHermes } from './mathRenderHermes';
 
 export interface MathReq { tex: string; display: boolean }
 export interface MathResult {
@@ -111,6 +112,8 @@ function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
 // pipeline can fall back to raw TeX rather than blocking forever.
 export async function renderMathBatch(items: MathReq[]): Promise<MathResult[]> {
   if (!items.length) return [];
+  // Dev-only spike (EXPO_PUBLIC_MATH_HERMES=1): MathJax in Hermes, no WebView.
+  if (HERMES_MATH_ENABLED) return renderMathBatchHermes(items);
   const errAll = (): MathResult[] => items.map(it => ({ ...it, error: 'timeout' }));
   // Trigger MathJax load if it hasn't been started yet (lazy mode).
   preloadMathJax();

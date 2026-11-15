@@ -34,6 +34,14 @@ function ensureDoc(): boolean {
   if (_doc) return true;
   if (_initError) return false;
   try {
+    // Hermes fix (see docs/mathjax-hermes-spike.md): mathjax-full/js/components/version.js
+    // does `eval('require')` / `eval('__dirname')` — Node-only — unless a global
+    // PACKAGE_VERSION exists. Without it the engine throws "Property 'require'
+    // doesn't exist" under Hermes. Harmless in Node.
+    const g = globalThis as any;
+    if (typeof g.PACKAGE_VERSION === 'undefined') {
+      g.PACKAGE_VERSION = require('mathjax-full/package.json').version;
+    }
     // Required, not imported at top level, so the engine only loads if an
     // article actually contains math (~24% of the corpus).
     const { mathjax } = require('mathjax-full/js/mathjax.js');
