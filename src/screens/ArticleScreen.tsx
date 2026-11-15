@@ -19,6 +19,7 @@ import {
 import { makeExcerpt } from '../utils/excerpt';
 import { fetchAndCacheArticle, ensureNotesCached, onMathReady } from '../services/catalog';
 import { perf } from '../utils/perf';
+import { startPrefetch } from '../services/prefetch';
 import { primeBackfillForSlugs, primeGraphLayouts } from '../services/inpho';
 import { idleScheduler } from '../services/idleScheduler';
 import { buildArticleHtml } from '../utils/articleTemplate';
@@ -321,6 +322,14 @@ export default function ArticleScreen() {
     isBookmarked(slug).then(setBookmarked);
     load();
   }, [slug]);
+
+  // Warm a few linked articles once this one is on screen and the reader has
+  // lingered (policy: src/utils/prefetchPolicy.ts). Cancelled on navigation.
+  const isReady = state.phase === 'ready';
+  useEffect(() => {
+    if (!isReady) return;
+    return startPrefetch(slug);
+  }, [slug, isReady]);
 
   // Background work (link indexing, backfills, graph priming) stays paused while
   // an article is opening so it can't compete with the load/first render.
