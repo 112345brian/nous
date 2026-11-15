@@ -245,3 +245,111 @@ export interface AppPrefsStore {
   getSyncFolder(): Promise<string>;
   setSyncFolder(path: string): Promise<void>;
 }
+
+// ── Seed import (UC-A2) ──────────────────────────────────────────────────────
+
+/** The part of a user-data export the seed import relies on; the adapter owns the rest of the shape. */
+export interface SeedUserDataShape {
+  version: number;
+  annotations: Array<{ id: number; content_hash: string | null }>;
+  prefs?: Record<string, string>;
+}
+
+/** The database files of the local library, addressed by role. `suffix` is '', '-wal' or '-shm'. */
+export interface SeedFiles {
+  /** Download `url` to a temporary file, reporting progress. Resolves to the HTTP status (null when there was no response); rejects on a network failure. */
+  download(url: string, onProgress: (bytesWritten: number, bytesTotal: number) => void): Promise<{ status: number | null }>;
+  /** Size in bytes of the downloaded temporary file, or null when it does not exist. */
+  downloadedSize(): Promise<number | null>;
+  /** Delete the temporary download; a missing file is not an error. */
+  discardDownload(): Promise<void>;
+  /** Create the folder the database lives in. */
+  prepareDbDir(): Promise<void>;
+  hasDb(suffix: string): Promise<boolean>;
+  hasBackup(suffix: string): Promise<boolean>;
+  /** Copy the database file to the backup location (the original stays). */
+  backUpDb(suffix: string): Promise<void>;
+  /** Delete a database file; a missing file is not an error. */
+  removeDb(suffix: string): Promise<void>;
+  /** Move the backup file back to the database location. */
+  restoreBackup(suffix: string): Promise<void>;
+  /** Rename a backup file so it is kept under `tag`, out of the way of the next backup. */
+  setAsideBackup(suffix: string, tag: string): Promise<void>;
+  removeBackup(suffix: string): Promise<void>;
+  /** Move the downloaded file into place as the main database file. */
+  installDownload(): Promise<void>;
+  /** Where the backup lives, for the error message when it cannot be put back. */
+  readonly backupLocation: string;
+}
+
+/** The open local database, as far as the seed swap needs it. */
+export interface SeedDatabase {
+  /** Close the connection (the next use reopens it lazily, on whatever file is then in place). */
+  close(): Promise<void>;
+  /** Every `meta` row. */
+  listMeta(): Promise<Array<{ key: string; value: string | null }>>;
+  /** Reading progress of every entry that has some. */
+  listReadProgress(): Promise<Array<{ slug: string; read_progress: number }>>;
+  /**
+   * In one transaction: set annotations.content_hash by id, and read_progress by slug (only for
+   * entries that exist; nothing is invented).
+   */
+  restoreDerived(data: {
+    annotationHashes: Array<{ id: number; content_hash: string }>;
+    readProgress: Array<{ slug: string; read_progress: number }>;
+  }): Promise<void>;
+}
+
+// ── Notification, prefetch and secrets ports ─────────────────────────────────
+
+/** Shows download progress to the reader (Android progress bar, iOS text notification). */
+export interface ProgressNotifier {
+  start(): Promise<void>;
+  /** `done` of `total` articles so far; the implementation decides how often this is shown. */
+  update(done: number, total: number): Promise<void>;
+  finish(total: number): Promise<void>;
+}
+
+/** What the notification platform can show. Unthrottled: the core decides when `update` is called. */
+export interface ProgressSink {
+  start(): Promise<void>;
+  update(done: number, total: number): void;
+  finish(total: number): Promise<void>;
+}
+
+/** The connection as the prefetch policy sees it (null = unknown). */
+export interface ConnectionInfo {
+  isConnected: boolean | null;
+  isInternetReachable: boolean | null;
+  /** Cellular or metered. */
+  isExpensive: boolean | null;
+}
+export interface Connectivity {
+  current(): Promise<ConnectionInfo>;
+}
+
+/** Runs a callback once animations and gestures have settled. */
+export interface Interactions {
+  afterInteractions(cb: () => void): { cancel(): void };
+}
+
+/** A cancellable pause. */
+export interface Delay {
+  start(ms: number): { done: Promise<void>; cancel(): void };
+}
+
+/** Outgoing links of an entry, with whether each target is cached (`cached_at` null = not). */
+export interface LinkLookup {
+  getLinksFrom(slug: string): Promise<Array<{ slug: string; cached_at: number | null }>>;
+}
+
+/** Secrets such as the Zotero API key (Keychain / Keystore). Failures come back as values, never throws. */
+export interface SecretStore {
+  available(): Promise<boolean>;
+  /** The stored secret, or null if absent or unreadable. */
+  get(key: string): Promise<string | null>;
+  /** True only if the value was stored. */
+  set(key: string, value: string): Promise<boolean>;
+  /** True if the secret is gone (or never existed). */
+  delete(key: string): Promise<boolean>;
+}

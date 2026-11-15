@@ -9,11 +9,10 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   downloadAll, syncCachedArticles, exportToSyncFolder, importFromSyncFolder, withDownloadHold,
-  metaStore, appPrefs, libraryRead, loadReaderSettings,
+  metaStore, appPrefs, libraryRead, loadReaderSettings, importSeedFromUrl,
 } from '../composition';
 import { linkPreviewValue } from '../utils/readerSettings';
 import type { DownloadProgress, Prefs } from '../types';
-import { importSeedFromUrl } from '../services/seedImport';
 import type { RootStackParamList } from '../../App';
 import { colors, themedStyles, roleMap } from '../theme/tokens';
 import { useScheme, type Appearance } from '../theme/ThemeProvider';

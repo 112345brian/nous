@@ -12,7 +12,7 @@ import {
   getSlugsByCacheStatus, getCachedSlugs, getMeta, setMeta,
   upsertIndexEntries, cacheArticle, getEntryCount, indexLinks, getAllEntryTitles, invalidateLinkCache,
   cleanDenormalizedTitles, getEntryHtml, updateArticleHtml, setArticleAst,
-  getUncachedAstSlugs, setEntryNotes, getMathByHashes, putMathBatch,
+  getUncachedAstSlugs, setEntryNotes, getMathByHashes, putMathBatch, getLinksFrom,
   type UserDataExport, type BookmarkRow,
 } from './services/db';
 import type { Annotation, DownloadProgress, IndexEntry, LibraryScope } from './types';
@@ -30,12 +30,17 @@ import { createMathCache } from './core/mathCache';
 import { createSubstituteMath } from './core/substituteMath';
 import { backfillAst as backfillAstUseCase } from './core/backfills';
 import { ensureNotesCached as ensureNotesUseCase } from './core/ensureNotes';
+import { importSeed, type SeedPhase } from './core/seedImport';
+import { seedFiles, seedDatabase } from './services/seedImport';
 import { fetchIndexHtml, fetchArticleHtml, fetchNotesHtml } from './services/catalog';
 import { renderMathBatch } from './services/mathRender';
 import { watchStalls, highResNow } from './services/stallWatch';
 import { expoSyncFolder } from './services/expoSyncFolder';
 import { zoteroHttp } from './services/zoteroHttp';
-import { startPrefetch as startPrefetchAdapter } from './services/prefetch';
+import { netInfoConnectivity, rnInteractions } from './services/prefetch';
+import { createPlatformProgressSink } from './services/downloadNotification';
+import { createPrefetcher } from './core/prefetch';
+import { createProgressNotifier } from './core/downloadNotifier';
 import { prewarmCommonMath, type PrewarmDeps } from './core/prewarmCommonMath';
 import { COMMON_MATH, commonMathStamp } from './data/commonMath';
 import { perf } from './services/perf';
@@ -246,9 +251,22 @@ export function backfillAst(): Promise<void> {
  * Once the reader has stayed on `slug` for a while, quietly cache a few of its uncached outgoing
  * links. Returns a cancel function: call it on navigation/unmount. Never throws.
  */
-export function startPrefetch(slug: string): () => void {
-  return startPrefetchAdapter(slug, s => fetchAndCacheArticle(s, { deferPriority: 'background' }));
-}
+export const startPrefetch: (slug: string) => () => void = createPrefetcher({
+  connectivity: netInfoConnectivity,
+  interactions: rnInteractions,
+  delay: { start: ms => { let t: ReturnType<typeof setTimeout>; return { done: new Promise<void>(r => { t = setTimeout(r, ms); }), cancel: () => clearTimeout(t) }; } },
+  links: { getLinksFrom },
+  fetchOne: s => fetchAndCacheArticle(s, { deferPriority: 'background' }),
+});
+
+// ── Download notification ────────────────────────────────────────────────────
+
+// Throttles progress updates (clock injected) and hands them to the platform sink. useBoot calls
+// these three around downloadAll.
+const downloadNotifier = createProgressNotifier({ sink: createPlatformProgressSink(), clock: { now: () => Date.now() } });
+export const startDownloadNotification = downloadNotifier.start;
+export const updateDownloadNotification = downloadNotifier.update;
+export const finishDownloadNotification = downloadNotifier.finish;
 
 // ── Common-equation pre-warm ─────────────────────────────────────────────────
 
@@ -366,3 +384,27 @@ export const prepareZoteroSend = (slug: string) =>
 /** Re-download cached articles when the auto-sync setting says it is due. */
 export const runAutoDeepSync = () =>
   runAutoDeepSyncUseCase({ meta: metaStore, clock: { now: () => Date.now() }, sync: () => syncCachedArticles(() => {}) });
+
+
+// ── Seed import (UC-A2) ──────────────────────────────────────────────────────
+
+export type { SeedPhase };
+
+/**
+ * Replace the local database with the one at `url`, keeping the reader's data. Callers wrap it in
+ * withDownloadHold. The orchestration is src/core/seedImport.ts; the file and connection calls
+ * are the adapters in src/services/seedImport.ts.
+ */
+export function importSeedFromUrl(url: string, onProgress: (p: SeedPhase) => void): Promise<void> {
+  return importSeed(
+    {
+      files: seedFiles,
+      db: seedDatabase,
+      userData: dbUserData,
+      meta: { setMeta },
+      clock: { now: () => Date.now() },
+    },
+    url,
+    onProgress,
+  );
+}

@@ -13,6 +13,8 @@
 // The module is loaded lazily on purpose: expo-secure-store resolves its native
 // module at import time and throws when it is not linked, which with a
 // top-level import would take down everything that imports db.ts.
+import type { SecretStore } from '../core/ports';
+
 type SecureStoreModule = typeof import('expo-secure-store');
 
 let mod: SecureStoreModule | null | undefined;
@@ -69,3 +71,11 @@ export async function deleteSecret(key: string): Promise<boolean> {
     return false;
   }
 }
+
+/** The same operations as the core's `SecretStore` port (the named functions above are kept for db.ts). */
+export const secureSecretStore: SecretStore = {
+  available: secretsAvailable,
+  get: getSecret,
+  set: setSecret,
+  delete: deleteSecret,
+};

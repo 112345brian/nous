@@ -3,7 +3,6 @@ import ReactTestRenderer from 'react-test-renderer';
 import { useBoot } from '../src/boot/useBoot';
 import type { BootResult } from '../src/boot/useBoot';
 
-jest.mock('../src/services/seedImport', () => ({ importSeedFromUrl: jest.fn() }));
 // The use cases come from the composition root. The common-math pre-warm is wired there too; its
 // stand-in schedules the same task name through the (mocked) idle scheduler, as the real one does.
 jest.mock('../src/composition', () => {
@@ -16,6 +15,7 @@ jest.mock('../src/composition', () => {
     downloadAll: jest.fn(),
     refreshIndexIfStale: jest.fn(),
     syncCachedArticles: jest.fn(),
+    importSeedFromUrl: jest.fn(),
     idleScheduler,
     withDownloadHold: jest.fn((fn: () => Promise<unknown>) => fn()),
     // The stores come from the root too (useBoot never imports services/db).
@@ -35,8 +35,8 @@ jest.mock('../src/services/downloadNotification', () => ({
 }));
 
 /* eslint-disable @typescript-eslint/no-require-imports */
-const seed = require('../src/services/seedImport');
 const root = require('../src/composition');
+const seed = root; // importSeedFromUrl is wired in the root
 // The same mock functions under the names this file's tests have always used.
 const db = {
   getMeta: root.metaStore.getMeta, getPrefs: root.appPrefs.getPrefs, savePrefs: root.appPrefs.savePrefs,
