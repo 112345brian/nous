@@ -37,36 +37,48 @@ because they leak state or globals into the logic that calls them.
 | `services/mathRender.ts` | 7 module variables (`injectFn`, `domReady`, `resolveReady`, `readyPromise`, `mathJaxLoading`, `seq`, `pending`) forming a bridge to the WebView component | `expo-asset`, `expo-file-system` | `setTimeout` (timeout race) | `MathRenderer` (batch **and** readiness lifecycle) | Listed |
 | `services/downloadNotification.ts` | `state` (throttle bookkeeping) | `react-native` `NativeModules`/`Platform`, `expo-notifications` | `Date.now` x1, `setTimeout` x2 | `ProgressNotifier` adapter | Already injected into the core (see section 3) |
 | `services/seedImport.ts` | none | `expo-file-system` (+ `/legacy`), dynamic `import('./db')` to call `closeDb` | none | `SeedInstaller` (download, close DB, replace file) | Not touched: `db-seed-import-safety` is rewriting it |
-| `screens/*`, `App.tsx` | n/a (UI) | 10 files import `services/db` directly | `InteractionManager` (ArticleScreen only), `Date.now` (HistoryScreen, ArticleScreen `updated_at`, App auto-sync interval), `setTimeout` (UI debounces) | wired use cases | Listed |
+| `screens/*`, `App.tsx` | n/a (UI) | 9 files import `services/db` as a value (tracked by a shrink-only test) | `InteractionManager` (ArticleScreen only), `Date.now` (HistoryScreen, ArticleScreen `updated_at`, App auto-sync interval), `setTimeout` (UI debounces) | wired use cases | Listed |
 
 Not hidden dependencies (deliberately allowed): `atob`/`btoa` (pure, deterministic; used in
 `utils/sepHtml/parse.ts`), seeded constant tables (`new Set([...])`), `Math`, `JSON`.
 
 ## 3. Composition root and direction of dependency
 
-**There is no composition root.** What exists instead:
+**`src/composition.ts` is the composition root** (added after the first version of this audit,
+which found none). It builds the concrete adapters and hands them to the core use cases;
+screens and `App.tsx` import the converted use cases from it. What it owns and what it does
+not yet:
 
-- `App.tsx` is the only real wiring point: it passes the notifier into
-  `downloadAll(onProgress, signal, scope)` and calls `preloadMathJax()`. That
-  `onProgress` callback is the one good existing example of injection in the codebase.
-- Every screen imports `services/db` (the SQLite adapter) directly: `ArticleScreen`,
-  `HomeScreen`, `GraphScreen`, `HistoryScreen`, `SettingsScreen`, `ReadingListScreen`,
-  `AnnotationsScreen`, `OnboardingScreen`, `OrphanedAnnotationsBanner`, and `App.tsx`.
-- `components/MathRenderWebView.tsx` registers itself into a module-level bridge in
+- **Wired in the root:** sync-folder export/import and Zotero export. Their adapters are
+  `services/expoSyncFolder.ts` and `services/zoteroHttp.ts`; the user-data store is a small
+  object over `services/db`; platform and home directory are read here, at the edge.
+- **Re-exported from `services/catalog.ts`:** `refreshIndexIfStale`, `fetchAndCacheArticle`,
+  `onMathReady`, `completeArticleMath`, `resumePendingMath`. `catalog.ts` still wires these
+  itself, because `downloadAll`, `syncCachedArticles` and the backfills call them. Moving that
+  wiring into the root first would make `catalog.ts` and `composition.ts` import each other.
+  Once those functions are converted, the wiring moves and the re-export becomes real code.
+  Callers already import from the root, so nothing changes for them.
+- `App.tsx` still wires `downloadAll(onProgress, ...)` to the download notifier and calls
+  `preloadMathJax()` itself.
+- `components/MathRenderWebView.tsx` still registers itself into a module-level bridge in
   `services/mathRender.ts` (`_registerInject`, `_onMessage`, `_signalDomReady`).
+- Nine files outside the services still import the SQLite adapter (`services/db`) as a value:
+  `App.tsx`, `ArticleScreen`, `HomeScreen`, `GraphScreen`, `HistoryScreen`, `SettingsScreen`,
+  `ReadingListScreen`, `AnnotationsScreen` and `OrphanedAnnotationsBanner`.
+  (`OnboardingScreen` imports only the `Prefs` type; the first version of this audit counted
+  it, and a test caught the mistake.)
 
-Direction of dependency after this change:
+Direction of dependency, all enforced by tests (`innerRing.test.ts`, `compositionRoot.test.ts`):
 
-- Inner ring to outer ring: **zero** imports (one existed, `utils/forceLayout` to
-  `services/graphDb`; fixed in the previous commit). Enforced.
-- Adapters to core: `services/dataSync.ts` imports `src/core/*`. Correct direction.
-- Core to adapters: none. Enforced (an import of `services/*`, `expo-*` or `react-native`
-  from `src/core` fails the check).
+| Rule | Check |
+|---|---|
+| Inner ring and core never import outer code, or the root | `innerRing.test.ts` |
+| Adapters (`src/services/*`) never import the root | RC2 |
+| Only `composition.ts` wires core use cases (one recorded exception: `services/catalog.ts`, see above; it fails if the exception goes stale) | RC3 |
+| Screens, components and `App.tsx` take the converted use cases from the root, not from `catalog`/`dataSync` | RC4 |
+| The list of files that import `services/db` directly can only shrink (a new one fails; a migrated one must leave the list) | RC5 |
 
-Recommendation: add one `src/composition.ts` that builds the adapters once and exports the
-wired use cases; screens import use cases from there, never `services/db`. Today the
-wrappers at the bottom of `services/dataSync.ts` play that role for the three converted
-use cases.
+Each rule was checked by introducing a deliberate violation and confirming it fails.
 
 ## 4. Converted now
 
@@ -80,6 +92,7 @@ All conversions keep the old exported function names and signatures, so no calle
 | Index refresh (UC-A3) | `catalog.refreshIndexIfStale` called `Date.now`, `fetch`, `./db` and the bundled seed directly | `core/refreshIndex.ts` takes `ArticleSource`, `LibraryIndexStore`, `KeyValueStore`, `Clock` and the bundled entries as a parameter; the contents-page parser and the link-index payload are pure (`utils/sepIndex.ts`); `catalog.refreshIndexIfStale()` is a wrapper with the same name, so `App.tsx` and `syncCachedArticles` are unchanged |
 | Article caching (UC-C1, C7) | `catalog.fetchAndCacheArticle` called `fetch`, `AbortController`, `./db`, the math pipeline, `perf` and `linkifyHtml` directly | `core/cacheArticle.ts` takes `ArticleSource`, `ArticleLibrary`, `ArticleMath`, `StageTimer` and a `linkify` function; page extraction, header stripping and the TeX/footnote checks are pure (`utils/sepArticlePage.ts`); `catalog.fetchAndCacheArticle(slug, opts)` is a wrapper, and the 30 s abort plus the `fetch`/`fetch-body` timing stay in a small adapter beside it, so callers (`ArticleScreen`, `prefetch`, `downloadAll`, `syncCachedArticles`, `runTests`) are unchanged |
 | Deferred-math completion (UC-C6) | `catalog.ts` held `pendingChain`, `mathReadyListeners` and `mathInFlight` as module-level singletons, plus the read-modify-write on `math_pending` | `core/mathCompletion.ts`: `createMathCompletion({ substitute, articles, meta, sleep })` keeps all state in a closure; `catalog.ts` creates the one app instance and re-exports `onMathReady`, `completeArticleMath` and `resumePendingMath` under the same names, so `ArticleScreen` and `backfillMathInline` are unchanged. `substitutemath` is deliberately **not** moved (see section 5) and is injected. The "is TeX left?" check is the pure, stateless `utils/sepMath.hasTexSpan` |
+| Composition root | wiring spread over `services/dataSync.ts` and `services/catalog.ts`; UI imported use cases from wherever they lived | `src/composition.ts` owns the sync/Zotero wiring and re-exports the catalog-wired use cases; `ArticleScreen`, `SettingsScreen`, `ReadingListScreen` and `App.tsx` import them from it; `dataSync.ts` keeps only the legacy `syncOnLaunch` no-op that `delete-legacy-compat` removes (left alone so that change still applies) |
 
 Evidence: `src/services/__tests__/dataSync.test.ts` (14 tests, written before the change
 against the old code and **unchanged** afterwards), the linkifier snapshots (taken from
@@ -137,9 +150,10 @@ only after the performance and db sessions have merged, to avoid conflicts.
    global-mutable coupling between a component and a service. Replace the six variables
    with one object created by the composition root and passed to both sides.
 8. **`seedImport.ts`** (UC-A2). Wait for `db-seed-import-safety`.
-9. **Screens and the composition root.** Add `src/composition.ts`, then migrate screens
-   from `services/db` to wired use cases one screen at a time. This is where most of the
-   "10 files import the SQLite adapter" count goes down.
+9. ~~The composition root~~: **started**, see sections 3 and 4. Next: (a) when `downloadAll`,
+   `syncCachedArticles` and the backfills are converted, move the catalog wiring into the root
+   and delete the exception in RC3; (b) migrate the nine files that import `services/db` to
+   wired use cases one at a time, removing each from the RC5 allowlist as it goes.
 10. **`db.ts`** splits (`LibraryStore` / `UserStore` / `KeyValueStore` / `SecretStore`) are the
     adapters side of the same boundary; sequence them after `db-secrets` and
     `db-connection-migrations` land.

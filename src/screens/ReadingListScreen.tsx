@@ -12,7 +12,7 @@ import {
 } from '../services/db';
 import type { BookmarkRow } from '../services/db';
 import type { Annotation } from '../types';
-import { exportToZotero } from '../services/dataSync';
+import { exportToZotero } from '../composition';
 import type { RootStackParamList } from '../../App';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;

@@ -15,7 +15,7 @@ import {
 import type { Prefs } from '../services/db';
 import { downloadAll, syncCachedArticles } from '../services/catalog';
 import type { DownloadProgress } from '../services/catalog';
-import { exportToSyncFolder, importFromSyncFolder } from '../services/dataSync';
+import { exportToSyncFolder, importFromSyncFolder } from '../composition';
 import { importSeedFromUrl } from '../services/seedImport';
 import type { RootStackParamList } from '../../App';
 

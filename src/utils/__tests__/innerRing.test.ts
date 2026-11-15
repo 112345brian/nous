@@ -28,7 +28,7 @@ const ROOT: string = path.join(__dirname, '..', '..', '..');
 const ALLOWED_PACKAGES = new Set(['htmlparser2']);
 // Repo-relative prefixes that belong to the outer ring.
 const OUTER_PREFIXES = [
-  'src/services/', 'src/screens/', 'src/components/', 'src/tests/',
+  'src/services/', 'src/screens/', 'src/components/', 'src/tests/', 'src/composition',
   'src/utils/sepHtml/render/', 'App', 'index',
 ];
 const FORBIDDEN_CALLS = new Set([

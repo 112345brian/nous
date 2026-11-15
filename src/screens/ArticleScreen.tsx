@@ -17,7 +17,8 @@ import {
   getMeta, setReadProgress, getLinksTo, indexLinks, getRecentSlugs, getMathSvgMap,
 } from '../services/db';
 import { makeExcerpt } from '../utils/excerpt';
-import { fetchAndCacheArticle, ensureNotesCached, onMathReady } from '../services/catalog';
+import { ensureNotesCached } from '../services/catalog';
+import { fetchAndCacheArticle, onMathReady } from '../composition';
 import { perf } from '../services/perf';
 import { startPrefetch } from '../services/prefetch';
 import { primeBackfillForSlugs, primeGraphLayouts } from '../services/inpho';

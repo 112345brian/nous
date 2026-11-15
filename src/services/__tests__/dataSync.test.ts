@@ -1,7 +1,7 @@
 // Behaviour of services/dataSync.ts as seen by its callers (SettingsScreen, ReadingListScreen).
 // Written BEFORE the logic moved into src/core, and kept unchanged afterwards: these tests
 // are what proves the extraction preserved behaviour. File system, fetch and db are fakes.
-import { exportToSyncFolder, importFromSyncFolder, exportToZotero } from '../dataSync';
+import { exportToSyncFolder, importFromSyncFolder, exportToZotero } from '../../composition';
 import * as db from '../db';
 import type { Annotation } from '../../types';
 
