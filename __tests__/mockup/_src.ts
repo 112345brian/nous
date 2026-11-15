@@ -20,6 +20,7 @@ export const SRC = {
   home: () => src('src/screens/HomeScreen.tsx'),
   article: () => src('src/screens/ArticleScreen.tsx'),
   toc: () => src('src/components/TocSheet.tsx'),
+  tokens: () => src('src/theme/tokens.ts'),
   graph: () => src('src/screens/GraphScreen.tsx'),
   db: () => src('src/services/db.ts'),
   injected: () => src('src/utils/injectedAssets.ts'),

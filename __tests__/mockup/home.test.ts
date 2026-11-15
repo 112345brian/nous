@@ -44,7 +44,7 @@ describe('HOME — home screen', () => {
   });
 
   test('HOME-13 progress bar track #2a2a2a 2px + accent fill at opacity .6', () => {
-    expect(home()).toMatch(/progressTrack:\s*\{[^}]*height:\s*2[^}]*backgroundColor:\s*'#2a2a2a'/);
+    expect(home()).toMatch(/progressTrack:\s*\{[^}]*height:\s*2[^}]*backgroundColor:\s*(?:'#2a2a2a'|colors\.(?:border|elevated))/);
     expect(home()).toMatch(/progressFill:\s*\{[^}]*opacity:\s*0?\.6/);
   });
 

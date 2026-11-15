@@ -8,6 +8,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { getAllAnnotations } from '../services/db';
 import type { AnnotationWithTitle } from '../services/db';
 import type { RootStackParamList } from '../../App';
+import { colors, themedStyles } from '../theme/tokens';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -61,7 +62,7 @@ export default function AnnotationsScreen() {
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top }]}>
-        <TouchableOpacity
+        <TouchableOpacity accessibilityRole="button"
           style={styles.back}
           onPress={() => nav.goBack()}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
@@ -91,7 +92,7 @@ export default function AnnotationsScreen() {
           contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
           renderItem={({ item: group }) => (
             <View style={styles.group}>
-              <TouchableOpacity
+              <TouchableOpacity accessibilityRole="button"
                 style={styles.groupHeader}
                 onPress={() => open(group.slug, group.title ?? group.slug)}
                 activeOpacity={0.7}
@@ -104,14 +105,14 @@ export default function AnnotationsScreen() {
                 </Text>
               </TouchableOpacity>
               {group.items.map(ann => (
-                <TouchableOpacity
+                <TouchableOpacity accessibilityRole="button"
                   key={ann.id}
                   style={styles.ann}
                   onPress={() => open(group.slug, group.title ?? group.slug)}
                   activeOpacity={0.7}
                 >
                   <View
-                    style={[styles.annStripe, { backgroundColor: COLOR_LABELS[ann.color] ?? '#7ba4ff' }]}
+                    style={[styles.annStripe, { backgroundColor: COLOR_LABELS[ann.color] ?? colors.accentSoft }]}
                   />
                   <View style={styles.annBody}>
                     <Text style={styles.annText} numberOfLines={3}>
@@ -134,8 +135,8 @@ export default function AnnotationsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#121212' },
+const styles = themedStyles(() => themedStyles(() => StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
 
   header: {
     flexDirection: 'row',
@@ -143,22 +144,22 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     paddingHorizontal: 4,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#2a2a2a',
+    borderBottomColor: colors.border,
     minHeight: 44,
   },
   back: { flexDirection: 'row', alignItems: 'center', minWidth: 80, paddingHorizontal: 8 },
-  backChevron: { color: '#7ba4ff', fontSize: 28, lineHeight: 28, marginRight: 1 },
-  backLabel: { color: '#7ba4ff', fontSize: 16 },
+  backChevron: { color: colors.accentSoft, fontSize: 28, lineHeight: 28, marginRight: 1 },
+  backLabel: { color: colors.accentSoft, fontSize: 16 },
   headerTitle: {
-    flex: 1, color: '#e8e8e8', fontSize: 15, fontWeight: '600', textAlign: 'center',
+    flex: 1, color: colors.text, fontSize: 15, fontWeight: '600', textAlign: 'center',
   },
   countBadge: {
-    color: '#7ba4ff', fontSize: 13, fontWeight: '600', marginLeft: 'auto',
+    color: colors.accentSoft, fontSize: 13, fontWeight: '600', marginLeft: 'auto',
   },
 
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 },
-  emptyTitle: { color: '#555', fontSize: 17, fontWeight: '500', marginBottom: 8 },
-  emptyHint: { color: '#3a3a3a', fontSize: 14, textAlign: 'center', lineHeight: 21 },
+  emptyTitle: { color: colors.textMuted, fontSize: 17, fontWeight: '500', marginBottom: 8 },
+  emptyHint: { color: colors.textMuted, fontSize: 14, textAlign: 'center', lineHeight: 21 },
 
   group: {
     marginTop: 24,
@@ -166,8 +167,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#2a2a2a',
-    backgroundColor: '#171717',
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
   },
   groupHeader: {
     flexDirection: 'row',
@@ -176,22 +177,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 11,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#222',
+    borderBottomColor: colors.borderSubtle,
   },
-  groupTitle: { flex: 1, color: '#e8e8e8', fontSize: 14, fontWeight: '600', marginRight: 8 },
-  groupCount: { color: '#444', fontSize: 12 },
+  groupTitle: { flex: 1, color: colors.text, fontSize: 14, fontWeight: '600', marginRight: 8 },
+  groupCount: { color: colors.textMuted, fontSize: 12 },
 
   ann: {
     flexDirection: 'row',
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#1e1e1e',
+    borderTopColor: colors.borderSubtle,
   },
   annStripe: { width: 3, flexShrink: 0 },
   annBody: { flex: 1, paddingHorizontal: 14, paddingVertical: 10, gap: 4 },
-  annText: { color: '#c8c8c8', fontSize: 14, lineHeight: 20 },
+  annText: { color: colors.textSecondary, fontSize: 14, lineHeight: 20 },
   annNote: {
-    color: '#7ba4ff', fontSize: 13, lineHeight: 18,
-    borderLeftWidth: 2, borderLeftColor: '#2a3a5a', paddingLeft: 8,
+    color: colors.accentSoft, fontSize: 13, lineHeight: 18,
+    borderLeftWidth: 2, borderLeftColor: colors.border, paddingLeft: 8,
   },
-  annDate: { color: '#3a3a3a', fontSize: 11, marginTop: 2 },
-});
+  annDate: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+})));

@@ -6,7 +6,8 @@ import {
 import Svg, { Path, Circle } from 'react-native-svg';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
+import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   searchEntries, getRecentSlugs, getBookmarks, getAllAnnotations,
@@ -15,21 +16,22 @@ import {
 import type { EntrySummary } from '../types';
 import type { AnnotationWithTitle } from '../services/db';
 import type { RootStackParamList } from '../../App';
+import { colors, themedStyles, roleMap, getScheme } from '../theme/tokens';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 // ── Design tokens ──────────────────────────────────────────────────────────
-const C = {
-  bg:           '#111111',
-  bgSurface:    '#1c1c1c',
-  border:       '#2e2e2e',
-  borderSubtle: '#222222',
-  text:         '#e4e4e4',
-  textHint:     '#555555',
-  accent:       '#5b8ef5',
-  accentDim:    'rgba(91,142,245,.14)',
+const C = roleMap({
+  bg: 'bg',
+  bgSurface: 'surface',
+  border: 'border',
+  borderSubtle: 'borderSubtle',
+  text: 'text',
+  textHint: 'textMuted',
+  accent: 'accent',
+  accentDim: 'rgba(91,142,245,.14)',
   accentBorder: 'rgba(91,142,245,.35)',
-};
+});
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 
@@ -250,6 +252,17 @@ export default function HomeScreen() {
     setTimeout(() => searchInputRef.current?.focus(), 100);
   };
 
+  // The article screen's "Search" action lands here with openSearch set. Open the
+  // field once, then clear the param so returning to Home later doesn't re-open it.
+  const route = useRoute<RouteProp<RootStackParamList, 'Home'>>();
+  const wantsSearch = route.params?.openSearch === true;
+  useEffect(() => {
+    if (!wantsSearch) return;
+    openSearch();
+    nav.setParams({ openSearch: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsSearch]);
+
   const closeSearch = () => {
     setSearchActive(false);
     setQuery('');
@@ -433,12 +446,12 @@ export default function HomeScreen() {
   return (
     <GestureDetector gesture={swipeLeft}>
     <View style={[styles.root, { paddingTop: insets.top }]}>
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+      <StatusBar barStyle={getScheme() === 'light' ? 'dark-content' : 'light-content'} backgroundColor={C.bg} />
 
       {/* ── App bar ── */}
       <View style={styles.ab}>
         <Text style={styles.abTitle}>Nous</Text>
-        <TouchableOpacity style={styles.ib} onPress={() => nav.navigate('Settings')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Settings" style={styles.ib} onPress={() => nav.navigate('Settings')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <IconDots />
         </TouchableOpacity>
       </View>
@@ -459,12 +472,12 @@ export default function HomeScreen() {
             autoCapitalize="none"
             onBlur={() => { if (!query.trim()) setTimeout(closeSearch, 120); }}
           />
-          <TouchableOpacity onPress={closeSearch}>
+          <TouchableOpacity accessibilityRole="button" onPress={closeSearch}>
             <Text style={styles.clearBtn}>✕</Text>
           </TouchableOpacity>
         </View>
       ) : (
-        <TouchableOpacity style={styles.searchPill} onPress={openSearch} activeOpacity={0.7}>
+        <TouchableOpacity accessibilityRole="button" style={styles.searchPill} onPress={openSearch} activeOpacity={0.7}>
           <IconSearch />
           <Text style={styles.searchPillText}>Search pages…</Text>
         </TouchableOpacity>
@@ -489,15 +502,15 @@ export default function HomeScreen() {
         <>
           {/* ── Inline tabs ── */}
           <View style={styles.tabRow}>
-            <TouchableOpacity style={styles.tabBtn} onPress={() => setActiveTab('reading')} activeOpacity={0.7}>
+            <TouchableOpacity accessibilityRole="button" style={styles.tabBtn} onPress={() => setActiveTab('reading')} activeOpacity={0.7}>
               <Text style={[styles.tabLabel, activeTab === 'reading' && styles.tabLabelActive]}>Reading</Text>
               {activeTab === 'reading' && <View style={styles.tabUnderline} />}
             </TouchableOpacity>
-            <TouchableOpacity style={styles.tabBtn} onPress={() => setActiveTab('notes')} activeOpacity={0.7}>
+            <TouchableOpacity accessibilityRole="button" style={styles.tabBtn} onPress={() => setActiveTab('notes')} activeOpacity={0.7}>
               <Text style={[styles.tabLabel, activeTab === 'notes' && styles.tabLabelActive]}>Notes</Text>
               {activeTab === 'notes' && <View style={styles.tabUnderline} />}
             </TouchableOpacity>
-            <TouchableOpacity style={styles.tabBtn} onPress={() => setActiveTab('browse')} activeOpacity={0.7}>
+            <TouchableOpacity accessibilityRole="button" style={styles.tabBtn} onPress={() => setActiveTab('browse')} activeOpacity={0.7}>
               <Text style={[styles.tabLabel, activeTab === 'browse' && styles.tabLabelActive]}>Browse</Text>
               {activeTab === 'browse' && <View style={styles.tabUnderline} />}
             </TouchableOpacity>
@@ -537,7 +550,7 @@ export default function HomeScreen() {
                 <Text style={styles.hint}>No notes yet.{'\n'}Highlight text in any article to add one.</Text>
               }
               renderItem={({ item: group }) => (
-                <TouchableOpacity
+                <TouchableOpacity accessibilityRole="button"
                   style={styles.noteGroup}
                   onPress={() => open(group.slug, group.title ?? group.slug)}
                   activeOpacity={0.6}
@@ -591,14 +604,16 @@ export default function HomeScreen() {
                         return (
                           <View>
                             <View style={styles.browseRow}>
-                              <TouchableOpacity
+                              <TouchableOpacity accessibilityRole="button"
                                 style={{ flex: 1 }}
                                 onPress={() => item.slug ? open(item.slug, item.label) : toggleParent(item.label)}
                                 activeOpacity={0.5}
                               >
                                 <Text style={styles.browseRowText} numberOfLines={1}>{item.label}</Text>
                               </TouchableOpacity>
-                              <TouchableOpacity
+                              <TouchableOpacity accessibilityRole="button"
+                                accessibilityLabel={`${isExpanded ? 'Collapse' : 'Expand'} ${item.label}`}
+                                accessibilityState={{ expanded: isExpanded }}
                                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                                 onPress={() => toggleParent(item.label)}
                               >
@@ -608,7 +623,7 @@ export default function HomeScreen() {
                               </TouchableOpacity>
                             </View>
                             {isExpanded && item.children.map(child => (
-                              <TouchableOpacity
+                              <TouchableOpacity accessibilityRole="button"
                                 key={child.slug}
                                 style={styles.browseSubRow}
                                 onPress={() => open(child.slug, `${item.label}: ${child.subTitle}`)}
@@ -622,7 +637,7 @@ export default function HomeScreen() {
                         );
                       }
                       return (
-                        <TouchableOpacity
+                        <TouchableOpacity accessibilityRole="button"
                           style={styles.browseRow}
                           onPress={() => open(item.slug, item.title)}
                           activeOpacity={0.5}
@@ -666,8 +681,10 @@ function PageRow({
   const meta = metaParts.join(' · ');
 
   return (
-    <TouchableOpacity style={styles.pageRow} onPress={() => onPress(item.slug, item.title)} activeOpacity={0.5}>
-      <TouchableOpacity
+    <TouchableOpacity accessibilityRole="button" style={styles.pageRow} onPress={() => onPress(item.slug, item.title)} activeOpacity={0.5}>
+      <TouchableOpacity accessibilityRole="button"
+        accessibilityLabel={isBookmarked ? 'Remove bookmark' : 'Bookmark'}
+        accessibilityHint="Long press for more options"
         style={[styles.pageRowIcon, isBookmarked && styles.pageRowIconBookmarked]}
         onPress={() => onIconPress?.(item)}
         onLongPress={() => onIconLongPress?.(item)}
@@ -697,7 +714,7 @@ function PageRow({
 
 // ── Styles ─────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
 
   ab: {
@@ -810,7 +827,7 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
     marginBottom: 4,
   },
-  parentTagText: { fontSize: 10, fontWeight: '500', color: C.accent, letterSpacing: 0.3 },
+  parentTagText: { fontSize: 11, fontWeight: '500', color: C.accent, letterSpacing: 0.3 },
   pageRowTitle: { fontSize: 14, fontWeight: '500', color: C.text, lineHeight: 18 },
   pageRowMeta: { fontSize: 12, color: C.textHint, marginTop: 2 },
   pageRowExcerpt: { fontSize: 12, color: C.textHint, marginTop: 3, lineHeight: 17 },
@@ -818,7 +835,7 @@ const styles = StyleSheet.create({
 
   progressTrack: {
     width: '100%', height: 2,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: colors.elevated,
     borderRadius: 1, marginTop: 7,
     overflow: 'hidden',
   },
@@ -855,7 +872,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   noteChipText: {
-    fontSize: 13, color: '#9a9a9a',
+    fontSize: 13, color: colors.textMuted,
     lineHeight: 18,
   },
   noteChipNote: {
@@ -928,12 +945,12 @@ const styles = StyleSheet.create({
   },
   scrubberExpanded: {
     width: 26,
-    backgroundColor: 'rgba(28,28,28,0.92)',
+    backgroundColor: colors.overlay,
     borderTopRightRadius: 8,
     borderBottomRightRadius: 8,
   },
   scrubberLetter: {
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: '500',
     color: C.textHint,
     lineHeight: 11,
@@ -941,7 +958,7 @@ const styles = StyleSheet.create({
   scrubberLetterActive: {
     color: C.accent,
     fontWeight: '700',
-    fontSize: 10,
+    fontSize: 11,
   },
   scrubberBubble: {
     position: 'absolute',
@@ -963,4 +980,4 @@ const styles = StyleSheet.create({
 
   hint: { color: C.textHint, fontSize: 15, lineHeight: 22, textAlign: 'center', marginTop: 80, paddingHorizontal: 32 },
   empty: { color: C.textHint, fontSize: 14, textAlign: 'center', marginTop: 48, paddingHorizontal: 32 },
-});
+}));

@@ -23,7 +23,7 @@ describe('ART — article screen', () => {
     expect(art()).toMatch(/articleHeader:\s*\{[^}]*paddingHorizontal:\s*18[^}]*paddingTop:\s*22/));
 
   test('ART-05 category eyebrow 11/600 uppercase accent', () =>
-    expect(art()).toMatch(/articleCategory:\s*\{[^}]*fontSize:\s*11[^}]*textTransform:\s*'uppercase'[^}]*color:\s*'#5b8ef5'/));
+    expect(art()).toMatch(/articleCategory:\s*\{[^}]*fontSize:\s*11[^}]*textTransform:\s*'uppercase'[^}]*color:\s*(?:colors\.accent|'#5b8ef5')/));
 
   test('ART-06 title 26 / 700', () =>
     expect(art()).toMatch(/articleTitle:\s*\{[^}]*fontSize:\s*26[^}]*fontWeight:\s*'700'/));

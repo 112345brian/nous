@@ -14,6 +14,7 @@ import type { BookmarkRow } from '../services/db';
 import type { Annotation } from '../types';
 import { exportToZotero } from '../services/dataSync';
 import type { RootStackParamList } from '../../App';
+import { colors, themedStyles } from '../theme/tokens';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -79,7 +80,7 @@ export default function ReadingListScreen() {
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top }]}>
-        <TouchableOpacity
+        <TouchableOpacity accessibilityRole="button"
           style={styles.back}
           onPress={() => nav.goBack()}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
@@ -135,20 +136,20 @@ function ReadingListItem({
 
   return (
     <View style={styles.card}>
-      <TouchableOpacity onPress={onOpen} activeOpacity={0.7}>
+      <TouchableOpacity accessibilityRole="button" onPress={onOpen} activeOpacity={0.7}>
         <Text style={styles.cardTitle}>{item.title}</Text>
         {item.author && <Text style={styles.cardAuthor}>{item.author}</Text>}
         <Text style={styles.cardCitation} selectable>{citation}</Text>
       </TouchableOpacity>
 
       <View style={styles.cardActions}>
-        <TouchableOpacity style={styles.action} onPress={onCopyCitation}>
+        <TouchableOpacity accessibilityRole="button" style={styles.action} onPress={onCopyCitation}>
           <Text style={styles.actionText}>Share Citation</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.action} onPress={onZotero}>
+        <TouchableOpacity accessibilityRole="button" style={styles.action} onPress={onZotero}>
           <Text style={styles.actionText}>→ Zotero</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.action, styles.actionRight]} onPress={onRemove}>
+        <TouchableOpacity accessibilityRole="button" style={[styles.action, styles.actionRight]} onPress={onRemove}>
           <Text style={styles.actionDestructive}>Remove</Text>
         </TouchableOpacity>
       </View>
@@ -156,46 +157,46 @@ function ReadingListItem({
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#121212' },
+const styles = themedStyles(() => themedStyles(() => StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
   header: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingBottom: 8,
     paddingHorizontal: 4,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#2a2a2a',
+    borderBottomColor: colors.border,
     minHeight: 44,
   },
   back: { flexDirection: 'row', alignItems: 'center', minWidth: 80, paddingHorizontal: 8 },
-  backChevron: { color: '#7ba4ff', fontSize: 28, lineHeight: 28, marginRight: 1 },
-  backLabel: { color: '#7ba4ff', fontSize: 16 },
-  headerTitle: { flex: 1, color: '#e8e8e8', fontSize: 15, fontWeight: '600', textAlign: 'center' },
+  backChevron: { color: colors.accentSoft, fontSize: 28, lineHeight: 28, marginRight: 1 },
+  backLabel: { color: colors.accentSoft, fontSize: 16 },
+  headerTitle: { flex: 1, color: colors.text, fontSize: 15, fontWeight: '600', textAlign: 'center' },
 
   empty: { flex: 1, alignItems: 'center', marginTop: 120, paddingHorizontal: 40 },
-  emptyText: { color: '#444', fontSize: 15, lineHeight: 22, textAlign: 'center' },
+  emptyText: { color: colors.textMuted, fontSize: 15, lineHeight: 22, textAlign: 'center' },
 
   card: {
     marginHorizontal: 16,
     marginTop: 16,
-    backgroundColor: '#171717',
+    backgroundColor: colors.surface,
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#2a2a2a',
+    borderColor: colors.border,
     overflow: 'hidden',
     paddingHorizontal: 16,
     paddingTop: 14,
   },
-  cardTitle: { color: '#e8e8e8', fontSize: 16, fontWeight: '500', marginBottom: 2 },
-  cardAuthor: { color: '#666', fontSize: 13, marginBottom: 10 },
+  cardTitle: { color: colors.text, fontSize: 16, fontWeight: '500', marginBottom: 2 },
+  cardAuthor: { color: colors.textMuted, fontSize: 13, marginBottom: 10 },
   cardCitation: {
-    color: '#555',
+    color: colors.textMuted,
     fontSize: 12,
     lineHeight: 17,
     fontFamily: 'Georgia',
     paddingBottom: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#222',
+    borderBottomColor: colors.borderSubtle,
   },
 
   cardActions: {
@@ -208,6 +209,6 @@ const styles = StyleSheet.create({
     paddingRight: 16,
   },
   actionRight: { marginLeft: 'auto', paddingRight: 0 },
-  actionText: { color: '#7ba4ff', fontSize: 13 },
-  actionDestructive: { color: '#ff6b6b', fontSize: 13 },
-});
+  actionText: { color: colors.accentSoft, fontSize: 13 },
+  actionDestructive: { color: colors.danger, fontSize: 13 },
+})));

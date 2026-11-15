@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, useWindowDimensions, ScrollView,
+  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, useWindowDimensions, ScrollView, FlatList,
 } from 'react-native';
 import Svg, { Line, Circle, G, Rect, Text as SvgText, Path } from 'react-native-svg';
 import Reanimated, {
-  useSharedValue, useAnimatedStyle, useAnimatedReaction, runOnJS, withSpring,
+  useSharedValue, useAnimatedStyle, useAnimatedReaction, runOnJS, withSpring, ReduceMotion,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -19,6 +19,7 @@ import { forceLayout, slugSeed } from '../utils/forceLayout';
 import type { LayoutNode } from '../utils/forceLayout';
 import { getGraph } from '../services/inpho';
 import type { RootStackParamList } from '../../App';
+import { colors, themedStyles } from '../theme/tokens';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Route = RouteProp<RootStackParamList, 'Graph'>;
@@ -90,9 +91,9 @@ function formatYear(y: number): string {
   return y < 0 ? `${Math.abs(y)} BCE` : `${y} CE`;
 }
 
-const READ_COLOR = { fill: '#1a3528', stroke: '#4aaf70' };   // ≥ 90 % read — green
-const PROG_COLOR = { fill: '#1e2a40', stroke: '#4a7fd4' };   // opened, in progress — blue
-const UNVISITED  = { fill: '#1e1e26', stroke: '#3a3a4a' };   // never opened — grey
+const readColor = () => ({ fill: colors.graphReadFill, stroke: colors.graphReadStroke });   // ≥ 90 % read — green
+const progColor = () => ({ fill: colors.graphProgFill, stroke: colors.graphProgStroke });   // opened, in progress — blue
+const unvisitedColor = () => ({ fill: colors.graphIdleFill, stroke: colors.graphIdleStroke });   // never opened — grey
 
 // label visibility driven by zoom level — none < 0.7 < partial < 1.4 < all < 2.5 < full
 type LabelMode = 'none' | 'partial' | 'all' | 'full';
@@ -106,7 +107,7 @@ function labelModeForScale(s: number): LabelMode {
 }
 
 
-function IconArrowUp({ color = '#9a9a9a' }: { color?: string }) {
+function IconArrowUp({ color = colors.textMuted }: { color?: string }) {
   return (
     <Svg width={21} height={21} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
       <Path d="M12 19V5M5 12l7-7 7 7" />
@@ -137,6 +138,9 @@ export default function GraphScreen() {
   const [selected, setSelected] = useState<{ slug: string; title: string } | null>(null);
   const [preview, setPreview] = useState<{ author: string | null; excerpt: string | null; context: string | null } | null>(null);
   const [labelMode, setLabelMode] = useState<LabelMode>('partial');
+  // Text alternative to the canvas: the same nodes as a list (screen readers can't
+  // traverse an SVG, and it's quicker for anyone scanning for a title).
+  const [listView, setListView] = useState(false);
 
   // When visitedOnly, filter rawData to center + visited nodes only.
   const displayData = useMemo<GraphData>(() => {
@@ -305,9 +309,9 @@ export default function GraphScreen() {
       .numberOfTaps(2)
       .onEnd(() => {
         'worklet';
-        scale.value = withSpring(fitScale.value, { damping: 20, stiffness: 200 });
-        translateX.value = withSpring(fitTx.value, { damping: 20, stiffness: 200 });
-        translateY.value = withSpring(fitTy.value, { damping: 20, stiffness: 200 });
+        scale.value = withSpring(fitScale.value, { damping: 20, stiffness: 200, reduceMotion: ReduceMotion.System });
+        translateX.value = withSpring(fitTx.value, { damping: 20, stiffness: 200, reduceMotion: ReduceMotion.System });
+        translateY.value = withSpring(fitTy.value, { damping: 20, stiffness: 200, reduceMotion: ReduceMotion.System });
       });
 
     const stap = Gesture.Tap()
@@ -525,21 +529,39 @@ export default function GraphScreen() {
   // would be illegibly small and overlap. The user wants every name visible.
   const showLabels = labelMode !== 'none';
 
+  // List rows for the text alternative: the centre article first, then timeline
+  // order (oldest first) or alphabetical.
+  const listRows = useMemo(() => {
+    const rows = nodes.map(n => {
+      const bits: string[] = [];
+      if (mode === 'timeline' && typeof n.birthYear === 'number') bits.push(formatYear(n.birthYear));
+      if ((n.readProgress ?? 0) >= 0.9) bits.push('read');
+      else if ((n.readProgress ?? 0) > 0) bits.push('in progress');
+      return { slug: n.slug, title: n.title, year: n.birthYear, meta: bits.join(' · '), isCenter: n.slug === centerSlug };
+    });
+    rows.sort((a, b) => {
+      if (a.isCenter !== b.isCenter) return a.isCenter ? -1 : 1;
+      if (mode === 'timeline' && typeof a.year === 'number' && typeof b.year === 'number') return a.year - b.year;
+      return a.title.localeCompare(b.title);
+    });
+    return rows;
+  }, [nodes, mode, centerSlug]);
+
   const labelColor = (node: LayoutNode): string => {
-    if (node.slug === centerSlug) return '#5b8ef5';
-    if ((node.readProgress ?? 0) >= 0.9) return '#4aaf70';
-    return '#4a7fd4';
+    if (node.slug === centerSlug) return colors.accent;
+    if ((node.readProgress ?? 0) >= 0.9) return colors.graphReadStroke;
+    return colors.graphProgStroke;
   };
 
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top }]}>
-        <TouchableOpacity
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back"
           style={styles.back}
           onPress={() => nav.goBack()}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
-          <IconArrowUp color="#9a9a9a" />
+          <IconArrowUp color={colors.textMuted} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerEyebrow}>GRAPH</Text>
@@ -547,7 +569,7 @@ export default function GraphScreen() {
             <Text style={styles.headerTitle} numberOfLines={1}>{centerTitle}</Text>
           ) : null}
         </View>
-        <TouchableOpacity
+        <TouchableOpacity accessibilityRole="button"
           style={[styles.visitedToggle, visitedOnly && styles.visitedToggleOn]}
           onPress={toggleVisitedOnly}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -556,12 +578,23 @@ export default function GraphScreen() {
             Visited
           </Text>
         </TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button"
+          accessibilityState={{ selected: listView }}
+          accessibilityLabel={listView ? 'Show graph' : 'Show as list'}
+          style={[styles.visitedToggle, listView && styles.visitedToggleOn]}
+          onPress={() => setListView(v => !v)}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={[styles.visitedToggleText, listView && styles.visitedToggleTextOn]}>
+            List
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* ── View switcher ── */}
       <View style={styles.modeBar}>
         {(['links', 'related', 'timeline', 'influence'] as GraphView[]).map(m => (
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button"
             key={m}
             style={[styles.modeChip, mode === m && styles.modeChipActive]}
             onPress={() => setMode(m)}
@@ -577,7 +610,7 @@ export default function GraphScreen() {
       <View style={[styles.canvas, { height: canvasH }]}>
         {loading ? (
           <View style={styles.loadingWrap}>
-            <ActivityIndicator color="#5b8ef5" />
+            <ActivityIndicator color={colors.accent} />
             <Text style={styles.loadingLabel}>
               {warming ? 'Computing layout…' : 'Mapping connections…'}
             </Text>
@@ -600,6 +633,23 @@ export default function GraphScreen() {
                 : "InPhO has no related ideas or thinkers for this entry,\nor the index is still syncing — check your connection."}
             </Text>
           </View>
+        ) : listView ? (
+          <FlatList
+            data={listRows}
+            keyExtractor={n => n.slug}
+            contentContainerStyle={styles.listContent}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel={`${item.title}${item.meta ? `, ${item.meta}` : ''}`}
+                style={styles.listRow}
+                onPress={() => nav.push('Article', { slug: item.slug, title: item.title })}
+              >
+                <Text style={styles.listTitle} numberOfLines={2}>{item.title}</Text>
+                {item.meta ? <Text style={styles.listMeta}>{item.meta}</Text> : null}
+              </TouchableOpacity>
+            )}
+          />
         ) : (
           <GestureDetector gesture={gesture}>
             <Reanimated.View style={[styles.canvasInner, animatedStyle]}>
@@ -618,22 +668,22 @@ export default function GraphScreen() {
                       <Rect
                         x={0} y={brkTop}
                         width={width} height={brkH}
-                        fill="rgba(22,22,30,0.85)"
+                        fill={colors.graphBand}
                       />
                       <Line
                         x1={0} y1={brkTop} x2={width} y2={brkTop}
-                        stroke="#2a2a38" strokeWidth={1}
+                        stroke={colors.graphLine} strokeWidth={1}
                         strokeDasharray="5,5"
                       />
                       <Line
                         x1={0} y1={brkBot} x2={width} y2={brkBot}
-                        stroke="#2a2a38" strokeWidth={1}
+                        stroke={colors.graphLine} strokeWidth={1}
                         strokeDasharray="5,5"
                       />
                       <SvgText
                         x={width / 2} y={midY - 7}
                         textAnchor="middle"
-                        fontSize={8} fill="#333344"
+                        fontSize={8} fill={colors.graphBreakText}
                         fontWeight="700"
                         letterSpacing={1.5}
                       >
@@ -642,7 +692,7 @@ export default function GraphScreen() {
                       <SvgText
                         x={width / 2} y={midY + 9}
                         textAnchor="middle"
-                        fontSize={10} fill="#38384e"
+                        fontSize={10} fill={colors.graphBreakTextSoft}
                         fontWeight="500"
                       >
                         {label}
@@ -661,7 +711,7 @@ export default function GraphScreen() {
                       key={i}
                       x1={a.x} y1={a.y}
                       x2={b.x} y2={b.y}
-                      stroke="#252525"
+                      stroke={colors.textMuted}
                       strokeWidth={1}
                     />
                   );
@@ -672,10 +722,10 @@ export default function GraphScreen() {
                   const isCenter = node.slug === centerSlug;
                   const isVisited = isCenter || node.read;
                   const progress = node.readProgress ?? 0;
-                  const nc = isCenter ? { fill: '#5b8ef5', stroke: '#5b8ef5' }
-                    : !isVisited ? UNVISITED
-                    : progress >= 0.9 ? READ_COLOR
-                    : PROG_COLOR;
+                  const nc = isCenter ? { fill: colors.accent, stroke: colors.accent }
+                    : !isVisited ? unvisitedColor()
+                    : progress >= 0.9 ? readColor()
+                    : progColor();
                   const r = isCenter ? 11 : isVisited ? (node.kind === 'thinker' ? 7 : 6) : 4;
                   const fill = nc.fill;
                   const stroke = nc.stroke;
@@ -710,7 +760,7 @@ export default function GraphScreen() {
                             <SvgText
                               x={lx} y={ly} textAnchor={anchor}
                               fontSize={9}
-                              fill="none" stroke="#111111" strokeWidth={2.5}
+                              fill="none" stroke={colors.textMuted} strokeWidth={2.5}
                               strokeLinejoin="round"
                             >
                               {label}
@@ -739,20 +789,20 @@ export default function GraphScreen() {
           style={[styles.legend, { bottom: insets.bottom + 12 }, legendStyle]}
         >
           <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#5b8ef5' }]} />
+            <View style={[styles.legendDot, { backgroundColor: colors.accent }]} />
             <Text style={styles.legendLabel}>This entry</Text>
           </View>
           <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: READ_COLOR.fill, borderWidth: 1, borderColor: READ_COLOR.stroke }]} />
+            <View style={[styles.legendDot, { backgroundColor: readColor().fill, borderWidth: 1, borderColor: readColor().stroke }]} />
             <Text style={styles.legendLabel}>Read</Text>
           </View>
           <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: PROG_COLOR.fill, borderWidth: 1, borderColor: PROG_COLOR.stroke }]} />
+            <View style={[styles.legendDot, { backgroundColor: progColor().fill, borderWidth: 1, borderColor: progColor().stroke }]} />
             <Text style={styles.legendLabel}>In progress</Text>
           </View>
           {!visitedOnly && (
             <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: UNVISITED.fill, borderWidth: 1, borderColor: UNVISITED.stroke }]} />
+              <View style={[styles.legendDot, { backgroundColor: unvisitedColor().fill, borderWidth: 1, borderColor: unvisitedColor().stroke }]} />
               <Text style={styles.legendLabel}>Unvisited</Text>
             </View>
           )}
@@ -767,7 +817,7 @@ export default function GraphScreen() {
       {/* ── Node preview card ── */}
       {selected && (
         <>
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button"
             style={styles.previewBackdrop}
             activeOpacity={1}
             onPress={() => { setSelected(null); setPreview(null); }}
@@ -792,7 +842,7 @@ export default function GraphScreen() {
                 <Text style={styles.previewExcerpt}>Not yet downloaded — open to read.</Text>
               )}
             </ScrollView>
-            <TouchableOpacity
+            <TouchableOpacity accessibilityRole="button"
               style={styles.previewBtn}
               onPress={() => { const s = selected; setSelected(null); setPreview(null); open(s.slug, s.title); }}
               activeOpacity={0.8}
@@ -806,8 +856,8 @@ export default function GraphScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#111111' },
+const styles = themedStyles(() => StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
 
   header: {
     flexDirection: 'row',
@@ -815,25 +865,25 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     paddingHorizontal: 4,
     borderBottomWidth: 1,
-    borderBottomColor: '#222222',
+    borderBottomColor: colors.borderSubtle,
     minHeight: 44,
-    backgroundColor: '#111111',
+    backgroundColor: colors.bg,
   },
   back: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   visitedToggle: {
     width: 44, height: 44, alignItems: 'center', justifyContent: 'center',
   },
   visitedToggleOn: {},
-  visitedToggleText: { fontSize: 11, fontWeight: '600', color: '#555', letterSpacing: 0.3 },
-  visitedToggleTextOn: { color: '#5b8ef5' },
+  visitedToggleText: { fontSize: 11, fontWeight: '600', color: colors.textMuted, letterSpacing: 0.3 },
+  visitedToggleTextOn: { color: colors.accent },
   headerCenter: { flex: 1, alignItems: 'center' },
   headerEyebrow: {
     fontSize: 11, fontWeight: '500',
     textTransform: 'uppercase', letterSpacing: 0.07 * 11,
-    color: '#555555',
+    color: colors.textMuted,
   },
   headerTitle: {
-    fontSize: 14, fontWeight: '600', color: '#e4e4e4', textAlign: 'center',
+    fontSize: 14, fontWeight: '600', color: colors.text, textAlign: 'center',
   },
 
   modeBar: {
@@ -841,7 +891,7 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 6,
-    backgroundColor: '#111111',
+    backgroundColor: colors.bg,
     height: 40,
     alignItems: 'center',
   },
@@ -850,37 +900,44 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: colors.border,
   },
   modeChipActive: { backgroundColor: 'rgba(91,142,245,0.14)', borderColor: 'rgba(91,142,245,0.4)' },
-  modeChipText: { color: '#777', fontSize: 12.5, fontWeight: '600' },
-  modeChipTextActive: { color: '#5b8ef5' },
+  modeChipText: { color: colors.textMuted, fontSize: 12.5, fontWeight: '600' },
+  modeChipTextActive: { color: colors.accent },
 
   canvas: { flex: 1, overflow: 'hidden', position: 'relative' },
+  listContent: { paddingHorizontal: 16, paddingBottom: 32 },
+  listRow: {
+    paddingVertical: 14, minHeight: 48,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
+  },
+  listTitle: { color: colors.text, fontSize: 16, lineHeight: 22 },
+  listMeta: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
   // transformOrigin top-left so scale pivots at (0,0): screen = world*scale + translate.
   // RN's default centre origin made pinch-zoom jump the content; this matches the
   // focal math in the pinch gesture and the inverse in the tap hit-test.
   canvasInner: { flex: 1, transformOrigin: 'left top' },
 
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  loadingLabel: { color: '#444', fontSize: 13 },
-  loadingHint: { color: '#555', fontSize: 12, textAlign: 'center', paddingHorizontal: 40, lineHeight: 18 },
-  emptyTitle: { color: '#555', fontSize: 17, fontWeight: '500' },
-  emptyHint: { color: '#333', fontSize: 14, textAlign: 'center', paddingHorizontal: 40, lineHeight: 21 },
+  loadingLabel: { color: colors.textMuted, fontSize: 13 },
+  loadingHint: { color: colors.textMuted, fontSize: 12, textAlign: 'center', paddingHorizontal: 40, lineHeight: 18 },
+  emptyTitle: { color: colors.textMuted, fontSize: 17, fontWeight: '500' },
+  emptyHint: { color: colors.textMuted, fontSize: 14, textAlign: 'center', paddingHorizontal: 40, lineHeight: 21 },
 
   legend: {
     position: 'absolute',
     left: 16,
     flexDirection: 'column',
     gap: 6,
-    backgroundColor: 'rgba(17,17,17,0.82)',
+    backgroundColor: colors.overlaySoft,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   legendDot: { width: 10, height: 10, borderRadius: 5 },
-  legendLabel: { color: '#555555', fontSize: 11 },
+  legendLabel: { color: colors.textMuted, fontSize: 11 },
 
   zoomHint: {
     position: 'absolute',
@@ -888,8 +945,8 @@ const styles = StyleSheet.create({
     right: 12,
   },
   zoomHintText: {
-    color: '#2e2e2e',
-    fontSize: 10,
+    color: colors.textMuted,
+    fontSize: 11,
     fontWeight: '500',
   },
 
@@ -897,10 +954,10 @@ const styles = StyleSheet.create({
   previewCard: {
     position: 'absolute',
     left: 16, right: 16,
-    backgroundColor: '#1c1c1c',
+    backgroundColor: colors.surface,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2e2e2e',
+    borderColor: colors.border,
     padding: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
@@ -908,14 +965,14 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 10,
   },
-  previewTitle: { color: '#e4e4e4', fontSize: 17, fontWeight: '700', lineHeight: 22 },
-  previewAuthor: { color: '#555', fontSize: 12, marginTop: 4 },
+  previewTitle: { color: colors.text, fontSize: 17, fontWeight: '700', lineHeight: 22 },
+  previewAuthor: { color: colors.textMuted, fontSize: 12, marginTop: 4 },
   previewContext: {
-    color: '#7a7a8a', fontSize: 12, lineHeight: 18, marginTop: 10,
+    color: colors.textMuted, fontSize: 12, lineHeight: 18, marginTop: 10,
     fontStyle: 'italic',
-    borderLeftWidth: 2, borderLeftColor: '#2e2e3e', paddingLeft: 10,
+    borderLeftWidth: 2, borderLeftColor: colors.graphRail, paddingLeft: 10,
   },
-  previewExcerpt: { color: '#9a9a9a', fontSize: 13, lineHeight: 19, marginTop: 8 },
+  previewExcerpt: { color: colors.textMuted, fontSize: 13, lineHeight: 19, marginTop: 8 },
   previewScroll: { maxHeight: 300 },
   previewScrollContent: { paddingBottom: 2 },
   previewBtn: {
@@ -928,5 +985,5 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(91,142,245,0.35)',
   },
-  previewBtnText: { color: '#5b8ef5', fontSize: 14, fontWeight: '600' },
-});
+  previewBtnText: { color: colors.accent, fontSize: 14, fontWeight: '600' },
+}));
