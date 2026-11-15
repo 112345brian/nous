@@ -1,5 +1,5 @@
-import React, { useCallback, useImperativeHandle, useMemo, useRef } from 'react';
-import { FlatList, View, type NativeSyntheticEvent, type NativeScrollEvent } from 'react-native';
+import React, { useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
+import { FlatList, View, type ViewToken, type NativeSyntheticEvent, type NativeScrollEvent } from 'react-native';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ParsedArticle, Block } from '../types';
@@ -7,6 +7,11 @@ import type { Annotation } from '../../../types';
 import { BlockView, type BlockHandlers } from './Blocks';
 import { SEP_COLORS, SEP_SIDE_PAD, useSepTheme } from './theme';
 import { activeHeadingId, collectHeadings, sepItemType, type ListEngine } from './listHelpers';
+
+// Heading lands just under the top edge with a little breathing room.
+const HEADING_VIEW_OFFSET = 8;
+// Stable (FlatList does not support changing viewabilityConfig after mount).
+const VIEWABILITY_CONFIG = { itemVisiblePercentThreshold: 1, minimumViewTime: 0 } as const;
 
 // SPIKE FLAG: 'flatlist' is the shipping engine. Flip to 'flashlist' to try
 // FlashList v2 (docs/library-research.md §5). The `listEngine` prop overrides it
@@ -54,7 +59,7 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
   const { measure } = useSepTheme();
   const flatListRef = useRef<FlatList<Block>>(null);
   const flashListRef = useRef<FlashListRef<Block>>(null);
-  const headingOffsets = useRef<Map<string, number>>(new Map());
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastProgress = useRef(0);
   const lastSection = useRef('');
 
@@ -75,8 +80,44 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
     [headings],
   );
 
-  const onHeadingLayout = useCallback((id: string, y: number) => {
-    headingOffsets.current.set(id, y);
+  // Refs keep the viewability callback stable (FlatList rejects a changing one).
+  const headingsRef = useRef(headings);
+  headingsRef.current = headings;
+  const onActiveSectionRef = useRef(onActiveSection);
+  onActiveSectionRef.current = onActiveSection;
+
+  const reportActive = useCallback((firstVisibleIndex: number) => {
+    const active = activeHeadingId(headingsRef.current, firstVisibleIndex);
+    if (active && active !== lastSection.current) {
+      lastSection.current = active;
+      onActiveSectionRef.current?.(active);
+    }
+  }, []);
+
+  // Index-based scroll-spy for the FlatList path: the first viewable item decides
+  // the section. (Heading onLayout y is cell-relative, so offsets can't be used.)
+  const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    let first: number | null = null;
+    for (const v of viewableItems) {
+      if (v.isViewable && typeof v.index === 'number' && (first === null || v.index < first)) first = v.index;
+    }
+    if (first !== null) reportActive(first);
+  }, [reportActive]);
+
+  useEffect(() => () => {
+    if (retryTimer.current) clearTimeout(retryTimer.current);
+  }, []);
+
+  const onScrollToIndexFailed = useCallback((info: { index: number; averageItemLength: number }) => {
+    // Item not yet measured: jump near it so it renders, then retry by index.
+    flatListRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false });
+    if (retryTimer.current) clearTimeout(retryTimer.current);
+    retryTimer.current = setTimeout(() => {
+      retryTimer.current = null;
+      flatListRef.current?.scrollToIndex({
+        index: info.index, viewPosition: 0, viewOffset: HEADING_VIEW_OFFSET, animated: true,
+      });
+    }, 200);
   }, []);
 
   const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -88,26 +129,11 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
       lastProgress.current = progress;
       onProgress(progress);
     }
-    if (onActiveSection) {
-      let active = '';
-      if (engine === 'flashlist') {
-        // Index-based spy: heading `onLayout` y is relative to its cell, not the
-        // list content, so it can't be compared with the scroll offset here.
-        const first = flashListRef.current?.getFirstVisibleIndex();
-        active = first === undefined ? '' : activeHeadingId(headings, first);
-      } else {
-        const spy = contentOffset.y + 80;
-        let bestY = -1;
-        headingOffsets.current.forEach((y, id) => {
-          if (y <= spy && y > bestY) { bestY = y; active = id; }
-        });
-      }
-      if (active && active !== lastSection.current) {
-        lastSection.current = active;
-        onActiveSection(active);
-      }
+    if (engine === 'flashlist' && onActiveSection) {
+      const first = flashListRef.current?.getFirstVisibleIndex();
+      if (first !== undefined) reportActive(first);
     }
-  }, [onProgress, onActiveSection, onScrollActivity, engine, headings]);
+  }, [onProgress, onActiveSection, onScrollActivity, engine, reportActive]);
 
   useImperativeHandle(ref, () => ({
     scrollToSection(id: string) {
@@ -117,15 +143,11 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
         if (index !== undefined) flashListRef.current?.scrollToIndex({ index, animated: true });
         return;
       }
-      const y = headingOffsets.current.get(id);
-      if (y !== undefined) {
-        flatListRef.current?.scrollToOffset({ offset: y, animated: true });
-        return;
-      }
-      // Heading not yet laid out (off-screen) — use index-based scroll.
       const index = headingIndexMap.get(id);
       if (index !== undefined) {
-        flatListRef.current?.scrollToIndex({ index, animated: true });
+        flatListRef.current?.scrollToIndex({
+          index, viewPosition: 0, viewOffset: HEADING_VIEW_OFFSET, animated: true,
+        });
       }
     },
   }), [headingIndexMap, engine]);
@@ -133,16 +155,14 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
   const handlers: BlockHandlers = useMemo(() => ({
     onLinkPress,
     onFootnotePress,
-    // FlashList path jumps by index, so skip the per-heading onLayout bookkeeping.
-    onHeadingLayout: engine === 'flashlist' ? undefined : onHeadingLayout,
     renderFallback,
     resolveImageSrc,
     annotations,
     onAnnotationPress,
     onAnnotationCreate,
     mathSvgs,
-  }), [onLinkPress, onFootnotePress, onHeadingLayout, renderFallback, resolveImageSrc,
-      annotations, onAnnotationPress, onAnnotationCreate, mathSvgs, engine]);
+  }), [onLinkPress, onFootnotePress, renderFallback, resolveImageSrc,
+      annotations, onAnnotationPress, onAnnotationCreate, mathSvgs]);
 
   const renderBlock = useCallback(({ item, index }: { item: Block; index: number }) => (
     <BlockView block={item} h={handlers} suppressTopBorder={index === 0} />
@@ -215,16 +235,9 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
       initialNumToRender={12}
       maxToRenderPerBatch={8}
       removeClippedSubviews
-      onScrollToIndexFailed={(info) => {
-        // Item not yet rendered — scroll to approximate position then retry once rendered.
-        flatListRef.current?.scrollToOffset({
-          offset: info.averageItemLength * info.index,
-          animated: false,
-        });
-        setTimeout(() => {
-          flatListRef.current?.scrollToIndex({ index: info.index, animated: true });
-        }, 200);
-      }}
+      onViewableItemsChanged={onViewableItemsChanged}
+      viewabilityConfig={VIEWABILITY_CONFIG}
+      onScrollToIndexFailed={onScrollToIndexFailed}
     />
   );
 });
