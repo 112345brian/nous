@@ -344,9 +344,44 @@ export async function getArticleVersionDate(slug: string, hash: string): Promise
   return row?.cached_at ?? null;
 }
 
+// Explicit column lists (no SELECT *): the heavy columns — content_html,
+// content_ast, notes_html — are each a whole article, so callers that don't need
+// them must not pay to read them.
+const ENTRY_META_COLUMNS =
+  'slug, title, parent_label, source, author, pub_date, content_hash, toc_html, ' +
+  'preamble_html, has_math, word_count, cached_at';
+const ENTRY_HEAVY_COLUMNS = 'content_html, notes_html, content_ast';
+
+// Everything about an entry except the article bodies.
+export type EntryMeta = Omit<EntryRow, 'content_html' | 'content_ast' | 'notes_html'>;
+
+// Full row, bodies included. Prefer getEntryMeta / getEntryHtml unless you need
+// the AST or notes too (see src/services/__tests__/getEntry.callers.test.ts).
 export async function getEntry(slug: string): Promise<EntryRow | null> {
   const db = await getDb();
-  return db.getFirstAsync<EntryRow>('SELECT * FROM entries WHERE slug = ?', [slug]);
+  return db.getFirstAsync<EntryRow>(
+    `SELECT ${ENTRY_META_COLUMNS}, ${ENTRY_HEAVY_COLUMNS} FROM entries WHERE slug = ?`,
+    [slug]
+  );
+}
+
+// Metadata only — no content_html / content_ast / notes_html.
+export async function getEntryMeta(slug: string): Promise<EntryMeta | null> {
+  const db = await getDb();
+  return db.getFirstAsync<EntryMeta>(
+    `SELECT ${ENTRY_META_COLUMNS} FROM entries WHERE slug = ?`,
+    [slug]
+  );
+}
+
+// Article body only. null when the entry is unknown or indexed but not cached.
+export async function getEntryHtml(slug: string): Promise<string | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ content_html: string | null }>(
+    'SELECT content_html FROM entries WHERE slug = ?',
+    [slug]
+  );
+  return row?.content_html || null;
 }
 
 // Lightweight row for graph node previews (no heavy content_html)

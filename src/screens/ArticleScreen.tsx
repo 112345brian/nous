@@ -12,7 +12,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import {
-  getEntry, getEntryPreview, recordRead, toggleBookmark, isBookmarked,
+  getEntry, getEntryHtml, getEntryPreview, recordRead, toggleBookmark, isBookmarked,
   saveAnnotation, updateAnnotation, deleteAnnotation, getAnnotationsForSlug,
   getMeta, setReadProgress, getLinksTo, indexLinks, getRecentSlugs, getMathSvgMap,
 } from '../services/db';
@@ -515,8 +515,7 @@ export default function ArticleScreen() {
   const goToEntry = useCallback(async (target: string) => {
     const enabled = (await getMeta('link_preview')) !== '0'; // default ON
     if (!enabled) { navToEntry(target); return; }
-    const [prev, entry] = await Promise.all([getEntryPreview(target), getEntry(target)]);
-    const html = entry?.content_html ?? null;
+    const [prev, html] = await Promise.all([getEntryPreview(target), getEntryHtml(target)]);
     setLinkPreview({
       slug: target,
       title: prev?.title ?? target,
