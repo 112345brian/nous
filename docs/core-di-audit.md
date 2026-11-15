@@ -203,11 +203,15 @@ Verified against the code. Please fold these into the draft.
   `/(?:)/`, which matches the empty string and never advances). The bundled index has 1838
   entries, so it cannot happen today; a corrupt or empty index would hang the app while
   caching an article. `createLinkifier` now returns the input unchanged for an empty index.
-- **Suspected, not fixed (behaviour preserved):** `~` expansion for the sync folder reads
-  `process.env.HOME`. React Native's `process.env` normally has no `HOME`, so on a real
-  device `~/Sync` likely resolves to `file://Sync/sep_user.json` (not a valid URI). Needs a
-  device check. With the new `SyncEnv`, the fix is to pass a real home directory from the
-  adapter (for example from `expo-file-system` `Paths`).
+- **Fixed (needs a device check):** `~` expansion for the sync folder read `process.env.HOME`,
+  which React Native does not set, so `~/Sync` became `file://Sync/sep_user.json` (not a valid
+  URI). Decision: on-device `~` means the app's Documents directory. The adapter
+  (`expoSyncHome()` in `services/expoSyncFolder.ts`, from `expo-file-system` `Paths.document`)
+  supplies it through `SyncEnv.home`; `utils/syncPath.ts` only expands `~` and `~/...` (not
+  `~user`), tolerates a trailing slash on the home, and returns `null` (no folder) when the
+  home is unknown rather than build an invalid URI. Neither the core nor `utils` reads
+  `process.env`. Still to confirm on a device: that `~/Sync` lands in Files > On My iPhone >
+  Nous (needs `UIFileSharingEnabled` / `LSSupportsOpeningDocumentsInPlace` if not already set).
 - **Fixed (test flipped in `refreshIndex.test.ts`):** after an offline
   first launch the bundled seed is stamped as a successful refresh
   (`index_refreshed_at = now`), so the app will not fetch the real index again for a week.
@@ -280,8 +284,9 @@ tests that fake the module wrap their fake in `helpers/mockDbModule.ts`.
   fails when one drifts (it found, and the change fixed, a `test-download.mjs` copy that did not
   decode numeric or named entities).
 - `origin/new-spinner`, an older unrelated UI feature (an animated logo), was not merged.
-- Still open from section 7: the `~` sync-folder expansion needs a device check. The bugs the
-  earlier pass left pinned, including the non-numeric `index_refreshed_at`, are fixed (see section 7).
+- Still open from section 7: the `~` sync-folder expansion is fixed (it now means the app's Documents
+  directory, supplied by the adapter) but still needs a device check. The non-numeric
+  `index_refreshed_at` bug and the four earlier pinned bugs are fixed (see section 7).
 
 ### What the parent's new code added to the picture
 
