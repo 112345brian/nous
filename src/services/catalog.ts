@@ -9,7 +9,7 @@ import { perf } from '../utils/perf';
 // djb2-xor passes with different seeds; birthday collision at ~2^32 unique inputs
 // vs. the ~65k bound of a 32-bit hash, making collisions essentially impossible
 // across the SEP corpus. Existing 8-char hashes (32-bit) in the DB remain valid.
-function mathHash(input: string, display: boolean): string {
+export function mathHash(input: string, display: boolean): string {
   let h1 = 5381, h2 = 52711;
   const s = input + (display ? '\x01' : '\x00');
   for (let i = 0; i < s.length; i++) {
