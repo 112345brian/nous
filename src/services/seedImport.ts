@@ -52,7 +52,6 @@ export const CACHE_META_KEYS: ReadonlySet<string> = new Set([
   'last_deep_sync',
   'math_inline_v2',
   'math_hash_format_v1',
-  'migrated_clear_cache_v2',
   'ast_parser_version',
 ]);
 
