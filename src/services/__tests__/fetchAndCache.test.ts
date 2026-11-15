@@ -17,7 +17,7 @@ jest.mock('../db', () => ({
   updateArticleHtml: jest.fn(async () => {}),
   setArticleAst: jest.fn(async () => {}),
 }));
-jest.mock('../mathRender', () => ({ renderMathBatch: jest.fn(async () => []) }));
+jest.mock('../../core/mathBridge', () => ({ createMathBridge: () => require('./fakeMathBridge').fakeMathBridge(jest.fn(async () => [])) }));
 
 // Records the dev-only timing stages in the order they run.
 const mockStages: string[] = [];

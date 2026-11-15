@@ -21,7 +21,7 @@ jest.mock('../db', () => ({
   cleanDenormalizedTitles: jest.fn(), getEntry: jest.fn(), setEntryNotes: jest.fn(async () => {}),
 }));
 const mockRender = jest.fn();
-jest.mock('../mathRender', () => ({ renderMathBatch: (...a: unknown[]) => mockRender(...a) }));
+jest.mock('../../core/mathBridge', () => ({ createMathBridge: () => require('./fakeMathBridge').fakeMathBridge((...a: unknown[]) => mockRender(...a)) }));
 
 import * as db from '../db';
 import { _resetMathCacheState } from '../../composition';   // the math runtime is built in the root

@@ -8,7 +8,7 @@ jest.mock('../db', () => ({
   getEntryHtml: async (slug: string) => mockHtml[slug] ?? null,
   setArticleAst: (slug: string, ast: string) => mockSetArticleAst(slug, ast),
 }));
-jest.mock('../mathRender', () => ({ renderMathBatch: async () => [] }));
+jest.mock('../../core/mathBridge', () => ({ createMathBridge: () => require('./fakeMathBridge').fakeMathBridge(async () => []) }));
 
 import { backfillAst } from '../../composition';   // wired in the composition root
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View } from 'react-native';
 import WebView from 'react-native-webview';
-import { _registerInject, _onMessage, _signalDomReady } from '../services/mathRender';
+import { mathWebViewHost } from '../composition';
 
 // Off-screen WebView that hosts MathJax (which can't run on Hermes) and converts
 // TeX → SVG on request from the fetch/backfill pipeline. Mounted once, app-wide.
@@ -12,7 +12,7 @@ import { _registerInject, _onMessage, _signalDomReady } from '../services/mathRe
 // rendered independently in the native renderer.
 //
 // SOURCE NOTE: this loads the MathJax engine (Apache-2.0) from a Metro asset
-// (src/assets/mathjax-full.b64) via mathRender.preloadMathJax(). Keeping it
+// (src/assets/mathjax-full.b64) via preloadMathJax() in the composition root. Keeping it
 // as an asset rather than a JS module avoids the 2.9 MB parse overhead on
 // every cold start. The SVGs it produces are generated on-device at runtime
 // and never bundled or shipped (see NOTICE.md / AGENTS.md).
@@ -61,7 +61,7 @@ export default function MathRenderWebView() {
   const ref = useRef<WebView>(null);
 
   useEffect(() => {
-    _registerInject((js: string) => ref.current?.injectJavaScript(js));
+    mathWebViewHost.attach((js: string) => ref.current?.injectJavaScript(js));
   }, []);
 
   return (
@@ -70,8 +70,8 @@ export default function MathRenderWebView() {
         ref={ref}
         source={{ html: BOOT_HTML }}
         originWhitelist={['*']}
-        onLoadEnd={() => _signalDomReady()}
-        onMessage={e => _onMessage(e.nativeEvent.data)}
+        onLoadEnd={() => mathWebViewHost.onDomReady()}
+        onMessage={e => mathWebViewHost.onMessage(e.nativeEvent.data)}
         javaScriptEnabled
         domStorageEnabled
         androidLayerType="software"
