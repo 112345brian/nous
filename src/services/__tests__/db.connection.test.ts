@@ -151,6 +151,21 @@ describe('upgrading an existing install (user_version = 0)', () => {
     expect(userVersion(fake.raw())).toBe(LATEST_CORE_SCHEMA_VERSION);
   });
 
+  it('adds the hot-path indexes to an install that was already at schema version 4', async () => {
+    await db.getDb();
+    await db.closeDb();
+    const r = fake.raw();
+    for (const idx of ['idx_reads_visited', 'idx_reads_session_visited', 'idx_reads_slug', 'idx_annotations_slug']) {
+      r.exec(`DROP INDEX IF EXISTS ${idx}`);
+    }
+    r.exec('PRAGMA user_version = 4');
+
+    await db.getDb();
+    const names = r.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%'").all().map((x: any) => x.name);
+    expect(names).toEqual(expect.arrayContaining(['idx_reads_visited', 'idx_reads_session_visited', 'idx_reads_slug', 'idx_annotations_slug']));
+    expect(userVersion(r)).toBe(5);
+  });
+
   it('leaves a database from a newer app version alone', async () => {
     await db.getDb();
     await db.closeDb();

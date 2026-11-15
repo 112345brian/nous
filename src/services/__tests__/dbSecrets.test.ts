@@ -277,19 +277,24 @@ describe('callers (static scan)', () => {
   }
   const files = walk(SRC).filter(p => !/__tests__/.test(p));
 
-  it('only dataSync.ts calls exportUserData / importUserData', () => {
+  // seedImport.ts is the one other legitimate caller: it snapshots the user's data
+  // across a database swap, and must restore its non-synced settings itself
+  // (setMeta) because the export format is the allowlisted sync format.
+  it('only dataSync.ts and seedImport.ts call exportUserData / importUserData', () => {
     const users = files
       .filter(p => /\b(exportUserData|importUserData)\(/.test(readFileSync(p, 'utf8')))
       .map(p => p.slice(SRC.length + 1))
       .filter(p => p !== join('services', 'db.ts'))
       .sort();
-    expect(users).toEqual([join('services', 'dataSync.ts')]);
+    expect(users).toEqual([join('services', 'dataSync.ts'), join('services', 'seedImport.ts')]);
   });
 
-  it('only db.ts names the Zotero credential keys (nothing reads them from meta elsewhere)', () => {
+  // seedImport.ts lists the keys only so a seed import keeps those meta rows; it
+  // never reads their values for use, and the key itself lives in secure storage.
+  it('only db.ts and seedImport.ts name the Zotero credential keys', () => {
     const users = files
       .filter(p => /zotero_(api_key|user_id)/.test(readFileSync(p, 'utf8')))
       .map(p => p.slice(SRC.length + 1));
-    expect(users).toEqual([join('services', 'db.ts')]);
+    expect(users).toEqual([join('services', 'db.ts'), join('services', 'seedImport.ts')]);
   });
 });

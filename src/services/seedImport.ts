@@ -10,7 +10,7 @@ import {
   makeDirectoryAsync,
   moveAsync,
 } from 'expo-file-system/legacy';
-import { closeDb, exportUserData, getDb, importUserData } from './db';
+import { closeDb, exportUserData, getDb, importUserData, setMeta } from './db';
 import type { UserDataExport } from './db';
 
 export type SeedPhase =
@@ -131,6 +131,15 @@ async function restoreUserData(snap: UserDataSnapshot): Promise<void> {
   // First getDb() on the new file opens it and runs the schema migrations, so a
   // seed that is not a usable database fails here, while a rollback is still possible.
   await importUserData(snap.data);
+
+  // importUserData writes only the synced-pref allowlist (it is the sync-file
+  // format and must never carry credentials). The settings this swap preserves
+  // (onboarding_done, sync_folder, zotero_user_id, ...) are not all in it, so
+  // write them back directly. A legacy zotero_api_key meta row goes back as a
+  // meta row, which the next read moves into secure storage.
+  for (const [key, value] of Object.entries(snap.data.prefs ?? {})) {
+    await setMeta(key, value);
+  }
 
   const db = await getDb();
   await db.withTransactionAsync(async () => {

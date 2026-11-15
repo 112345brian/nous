@@ -177,7 +177,12 @@ export const fakeDbModule = {
       delete copy.content_hash;
       db.annotations.push(copy);
     }
-    for (const [k, v] of Object.entries(data.prefs ?? {})) db.meta[k] = v as string;
+    // Mirrors the real importUserData: only the synced-pref allowlist is written;
+    // every other key (onboarding_done, sync_folder, credentials) is ignored.
+    const { SYNCED_PREF_KEYS } = jest.requireActual('../db') as { SYNCED_PREF_KEYS: readonly string[] };
+    for (const [k, v] of Object.entries(data.prefs ?? {})) {
+      if (SYNCED_PREF_KEYS.includes(k)) db.meta[k] = v as string;
+    }
   },
   async setMeta(key: string, value: string) {
     (await openDb()).meta[key] = value;

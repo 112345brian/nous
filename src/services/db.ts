@@ -61,37 +61,6 @@ export async function closeDb(): Promise<void> {
   } finally {
     if (_closing === closing) _closing = null;
   }
-
-  await applyQueryIndexes(db);
-}
-
-// ── Migration step: indexes for the hot read paths ──────────────────────────
-// Kept as its own self-contained, idempotent step (CREATE INDEX IF NOT EXISTS)
-// so it can become one entry in a versioned migration list without changes.
-// Each index is here because EXPLAIN QUERY PLAN against the real schema showed a
-// full scan, a temp b-tree, or a per-query AUTOMATIC index without it:
-//   idx_reads_visited          recordRead's "latest read" lookup, run on every
-//                              article open (was SCAN + temp b-tree sort)
-//   idx_reads_session_visited  getSessions: pick the newest sessions and load
-//                              just their rows (covering scan, then SEARCH)
-//   idx_reads_slug             getRecentSlugs grouping, the graph's
-//                              EXISTS/DISTINCT over reads, and the title cleanup
-//   idx_annotations_slug       annotations by slug (+ created_at order) and the
-//                              per-row annotation_count subqueries
-// Not added: entries(source) / entries(cached_at). The scope queries must visit
-// every row to count or partition, so an index on a 3-value column changes
-// nothing (plans checked).
-const QUERY_INDEXES = [
-  'CREATE INDEX IF NOT EXISTS idx_reads_visited ON reads(visited_at)',
-  'CREATE INDEX IF NOT EXISTS idx_reads_session_visited ON reads(session_id, visited_at)',
-  'CREATE INDEX IF NOT EXISTS idx_reads_slug ON reads(slug)',
-  'CREATE INDEX IF NOT EXISTS idx_annotations_slug ON annotations(slug, created_at)',
-];
-
-async function applyQueryIndexes(db: SQLite.SQLiteDatabase): Promise<void> {
-  for (const sql of QUERY_INDEXES) {
-    await db.runAsync(sql);
-  }
 }
 
 export async function getEntryCount(): Promise<number> {
