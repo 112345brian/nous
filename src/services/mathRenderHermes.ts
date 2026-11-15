@@ -1,6 +1,6 @@
 // DEV-ONLY spike: typeset TeX → SVG with MathJax running directly in the Hermes
 // JS runtime (no WebView, no 3 MB asset). Same call shape and result shape as
-// mathRender.renderMathBatch, so it can stand in for it behind a flag.
+// the `MathRenderer` port (core/ports.ts), so composition.ts can pick it instead of the WebView bridge behind a flag.
 // See docs/mathjax-hermes-spike.md for numbers and the recommendation.
 //
 // Rendering is synchronous per equation, so a batch is cut into time-budgeted
@@ -8,7 +8,7 @@
 // about one slice plus one equation.
 
 import { texToSvg } from '../utils/sepHtml/render/texToSvg';
-import type { MathReq, MathResult } from './mathRender';
+import type { MathRequest as MathReq, MathResult } from '../core/ports';
 
 /** Build-time flag. Off by default; the WebView path is untouched when off. */
 export const HERMES_MATH_ENABLED = process.env.EXPO_PUBLIC_MATH_HERMES === '1';

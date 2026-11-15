@@ -32,7 +32,7 @@ jest.mock('../db', () => ({
 }));
 
 const mockRender = jest.fn();
-jest.mock('../mathRender', () => ({ renderMathBatch: (...a: unknown[]) => mockRender(...a) }));
+jest.mock('../../core/mathBridge', () => ({ createMathBridge: () => require('./fakeMathBridge').fakeMathBridge((...a: unknown[]) => mockRender(...a)) }));
 
 import { completeArticleMath } from '../../composition';   // wired in the composition root
 import { ensureMath, _resetMathCacheState } from '../../composition';   // built in the root

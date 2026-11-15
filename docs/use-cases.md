@@ -130,7 +130,7 @@ them over. Screens and `src/boot` import the wired use cases from `composition.t
 | `NotesStore` (`setEntryNotes`) | C4 | `services/db.ts` |
 | `ArticleMathStore` (read and rewrite an article's body, store its AST) | C6 | `services/db.ts` |
 | `ArticleMath` (`substitute`: render now; `completeLater`: render in the background; `queueForLater`: record the debt only) | C1, C6, G1, G2 | `services/catalog.ts` (`substitutemath`) plus the pipeline in `core/mathCompletion.ts` |
-| `MathRenderer` (`render`: typeset equations, one result per request) | C1, C6 | `services/mathRender.ts` (hidden MathJax WebView; flagged Hermes spike in `mathRenderHermes.ts`) |
+| `MathRenderer` (`render`: typeset equations, one result per request) | C1, C6 | `core/mathBridge.ts` (WebView bridge, one instance in the root) + `services/mathRender.ts` (asset loader); flagged Hermes spike in `services/mathRenderHermes.ts` |
 | `MathStore` (`getMathByHashes`, `putMathBatch`: the equation table) | C6 | `services/db.ts` |
 | `LibraryCacheStatus` (cached and uncached entries) | G1, G2 | `services/db.ts` |
 | `LibraryBackfillStore` (articles with no AST) | A4 | `services/db.ts` |
